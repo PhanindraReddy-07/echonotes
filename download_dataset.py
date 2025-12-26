@@ -194,14 +194,12 @@ class DatasetDownloader:
                 dataset = load_dataset(
                     config['hf_name'],
                     config['hf_config'],
-                    split=split,
-                    trust_remote_code=True
+                    split=split
                 )
             else:
                 dataset = load_dataset(
                     config['hf_name'],
-                    split=split,
-                    trust_remote_code=True
+                    split=split
                 )
         except Exception as e:
             print(f"❌ Download failed: {e}")

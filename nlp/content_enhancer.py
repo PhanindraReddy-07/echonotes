@@ -1,57 +1,43 @@
 """
-Generative Content Enhancer - Offline NLP
-==========================================
-Uses offline transformer models to generate:
-- Simple explanations for complex concepts
-- Elaborated content for better understanding
-- Key takeaways and insights
-- Simplified summaries for different audiences
-- Related examples and analogies
-- FAQ generation
+Content Enhancer v3 - Accurate Content Generation
+==================================================
+Hybrid approach prioritizing EXTRACTION over GENERATION for accuracy.
 
-Models used (all offline after download):
-- google/flan-t5-small (77MB) - Best for instructions/Q&A
-- t5-small (242MB) - Good for summarization/generation
-- sentence-transformers/all-MiniLM-L6-v2 (23MB) - Semantic similarity
+Key improvements:
+1. Extraction-first approach (more accurate)
+2. Context-aware AI prompts (when AI is used)
+3. Smart sentence scoring and selection
+4. Better fallback mechanisms
+5. Improved text preprocessing
 
-Usage:
-    enhancer = ContentEnhancer()
-    
-    # Generate simple explanation
-    simple = enhancer.simplify("Complex technical text here...")
-    
-    # Generate elaboration
-    detailed = enhancer.elaborate("Brief concept description")
-    
-    # Generate key takeaways
-    takeaways = enhancer.generate_takeaways(text)
+Modes:
+- Extraction-only (default): Fast, accurate, no AI needed
+- AI-enhanced: Uses Flan-T5 for additional elaboration
 """
-
 import re
-import os
+import math
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
+from collections import Counter
 from pathlib import Path
 
 
 @dataclass
 class GeneratedContent:
-    """Container for generated content"""
+    """Container for all generated/extracted content"""
     original: str
     simplified_explanation: str
     key_takeaways: List[str]
     elaboration: str
-    eli5_explanation: str  # Explain Like I'm 5
     examples: List[str]
-    faq: List[Dict[str, str]]  # [{'q': question, 'a': answer}]
-    vocabulary: List[Dict[str, str]]  # [{'term': word, 'meaning': definition}]
+    faq: List[Dict[str, str]]
+    vocabulary: List[Dict[str, str]]
     
     def to_dict(self) -> Dict:
         return {
             'simplified': self.simplified_explanation,
             'takeaways': self.key_takeaways,
             'elaboration': self.elaboration,
-            'eli5': self.eli5_explanation,
             'examples': self.examples,
             'faq': self.faq,
             'vocabulary': self.vocabulary
@@ -60,117 +46,123 @@ class GeneratedContent:
 
 class ContentEnhancer:
     """
-    Generates enhanced educational content using offline models
+    Content enhancement using extraction-first approach.
     
-    Features:
-    - Simplify complex text
-    - Generate key takeaways
-    - Create ELI5 (Explain Like I'm 5) versions
-    - Generate relevant examples
-    - Create FAQ from content
-    - Extract and define vocabulary
+    This class extracts and structures content from the source text,
+    optionally using AI models for additional elaboration.
     
-    All models run 100% offline after initial download.
+    The extraction-first approach is more accurate because it uses
+    the actual content rather than generating potentially irrelevant text.
     """
     
-    # Model configurations
-    MODELS = {
-        'flan-t5': {
-            'name': 'google/flan-t5-base',  # Upgraded from small (250MB vs 77MB)
-            'size': '250MB',
-            'task': 'text2text-generation'
-        },
-        'flan-t5-small': {
-            'name': 'google/flan-t5-small',
-            'size': '77MB',
-            'task': 'text2text-generation'
-        },
-        't5': {
-            'name': 't5-small', 
-            'size': '242MB',
-            'task': 'text2text-generation'
-        },
-        'embeddings': {
-            'name': 'sentence-transformers/all-MiniLM-L6-v2',
-            'size': '23MB'
-        }
+    # Stopwords for filtering
+    STOPWORDS = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
+        'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+        'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'need',
+        'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
+        'we', 'us', 'our', 'you', 'your', 'he', 'him', 'his', 'she', 'her',
+        'i', 'me', 'my', 'as', 'if', 'so', 'than', 'such', 'when', 'where',
+        'which', 'who', 'what', 'how', 'all', 'each', 'every', 'both', 'few',
+        'more', 'most', 'other', 'some', 'any', 'no', 'not', 'only', 'same',
+        'just', 'also', 'very', 'even', 'back', 'now', 'well', 'also', 'just',
+        'like', 'really', 'want', 'going', 'something', 'actually', 'thing',
+        'things', 'way', 'yeah', 'yes', 'okay', 'ok', 'um', 'uh', 'basically',
     }
     
-    def __init__(
-        self,
-        model_name: str = 'flan-t5',
-        cache_dir: Optional[str] = None,
-        device: str = 'auto'
-    ):
+    # Important sentence indicators (for scoring)
+    IMPORTANCE_SIGNALS = {
+        'high': [
+            'in conclusion', 'to summarize', 'the main point', 'most importantly',
+            'the key is', 'crucial', 'essential', 'fundamental', 'primarily',
+            'significantly', 'notably', 'the purpose', 'the goal', 'therefore',
+            'as a result', 'in summary', 'ultimately', 'in essence', 'the bottom line',
+            'this means', 'this shows', 'this demonstrates', 'importantly',
+        ],
+        'medium': [
+            'for example', 'for instance', 'such as', 'including', 'specifically',
+            'first', 'second', 'third', 'finally', 'additionally', 'moreover',
+            'furthermore', 'however', 'because', 'since', 'due to', 'leads to',
+            'according to', 'research shows', 'studies indicate', 'in other words',
+        ],
+        'definition': [
+            'is defined as', 'refers to', 'means that', 'is called', 'known as',
+            'is a', 'is an', 'are a', 'are an', 'can be described as',
+        ],
+        'example': [
+            'for example', 'for instance', 'such as', 'like', 'including',
+            'consider', 'imagine', 'suppose', 'take the case of', 'as an example',
+        ],
+    }
+    
+    def __init__(self, use_ai: bool = False, model_name: str = "google/flan-t5-base"):
         """
         Initialize content enhancer
         
         Args:
-            model_name: 'flan-t5' (recommended) or 't5'
-            cache_dir: Directory to cache models
-            device: 'auto', 'cpu', or 'cuda'
+            use_ai: Whether to use AI model for additional generation
+            model_name: HuggingFace model to use if AI enabled
         """
+        self.use_ai = use_ai
         self.model_name = model_name
-        self.cache_dir = cache_dir or str(Path.home() / '.cache' / 'echonotes')
-        self.device = device
-        
         self.model = None
         self.tokenizer = None
-        self.embedder = None
-        
-        # Ensure cache directory exists
-        Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
+        self.device = "cpu"
+        self.cache_dir = Path.home() / ".cache" / "echonotes"
+        self._model_loaded = False
     
     def _load_model(self) -> bool:
-        """Load the text generation model"""
-        if self.model is not None:
+        """Load AI model if needed and not already loaded"""
+        if not self.use_ai:
+            return False
+        
+        if self._model_loaded:
             return True
         
         try:
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
             import torch
             
-            model_config = self.MODELS.get(self.model_name, self.MODELS['flan-t5'])
-            model_name = model_config['name']
+            print(f"[ContentEnhancer] Loading model: {self.model_name}")
             
-            print(f"[ContentEnhancer] Loading {model_name}...")
-            print(f"[ContentEnhancer] This may take a moment on first run (downloading {model_config['size']})")
-            
-            # Determine device
-            if self.device == 'auto':
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            else:
-                device = self.device
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             
             self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
+                self.model_name,
                 cache_dir=self.cache_dir
             )
             
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name,
+                self.model_name,
                 cache_dir=self.cache_dir
             ).to(device)
             
             self.device = device
+            self._model_loaded = True
             print(f"[ContentEnhancer] Model loaded on {device}")
             return True
             
         except ImportError:
-            print("[ContentEnhancer] Required: pip install transformers torch")
+            print("[ContentEnhancer] AI disabled - transformers/torch not installed")
+            self.use_ai = False
             return False
         except Exception as e:
             print(f"[ContentEnhancer] Error loading model: {e}")
+            self.use_ai = False
             return False
     
-    def _clean_input_text(self, text: str) -> str:
-        """Clean transcript metadata from input text"""
+    def _clean_text(self, text: str) -> str:
+        """Clean and normalize input text"""
         lines = text.split('\n')
         clean_lines = []
         
-        skip_keywords = [
-            'echonotes', 'transcript', 'audio:', 'duration:', 'words:', 
-            'confidence:', 'timestamps:', 'generated:', 'recording'
+        # Skip patterns for metadata
+        skip_patterns = [
+            r'^={2,}', r'^-{2,}', r'^\[.*\]$',
+            r'^transcript:', r'^audio:', r'^duration:',
+            r'^confidence:', r'^words:', r'^timestamps:',
+            r'^generated:', r'^echonotes', r'^recording',
         ]
         
         for line in lines:
@@ -178,31 +170,270 @@ class ContentEnhancer:
             if not line:
                 continue
             
-            # Skip metadata lines
-            line_lower = line.lower()
-            if any(kw in line_lower for kw in skip_keywords):
-                continue
-            if line.startswith('=') or line.startswith('-'):
-                continue
-            if re.match(r'^\[\d{2}:\d{2}\]', line):
+            # Skip metadata
+            skip = False
+            for pattern in skip_patterns:
+                if re.match(pattern, line, re.IGNORECASE):
+                    skip = True
+                    break
+            if skip:
                 continue
             
             # Remove timestamp markers
-            line = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip()
+            line = re.sub(r'\[\d{1,2}:\d{2}(?::\d{2})?\]', '', line).strip()
             
-            if len(line) > 10:
+            if len(line) > 5:
                 clean_lines.append(line)
         
-        return ' '.join(clean_lines)
+        text = ' '.join(clean_lines)
+        
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+        
+        return text.strip()
     
-    def _generate(
-        self,
-        prompt: str,
-        max_length: int = 256,
-        temperature: float = 0.7,
-        num_beams: int = 4
-    ) -> str:
-        """Generate text from prompt"""
+    def _split_sentences(self, text: str) -> List[str]:
+        """Split text into sentences"""
+        # Protect abbreviations
+        text = re.sub(r'\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|e\.g|i\.e)\.\s+', r'\1<DOT> ', text)
+        
+        # Split on sentence boundaries
+        sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+        
+        # Restore periods
+        sentences = [s.replace('<DOT>', '.').strip() for s in sentences]
+        
+        # Filter by length
+        return [s for s in sentences if len(s) >= 20 and len(s.split()) >= 4]
+    
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize text into words"""
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        return [w for w in words if w not in self.STOPWORDS]
+    
+    def _score_sentence(self, sentence: str, position: int, total: int) -> float:
+        """Score sentence by importance using multiple signals"""
+        score = 0.0
+        sent_lower = sentence.lower()
+        
+        # Position score (first/last sentences are important)
+        rel_pos = position / max(1, total - 1)
+        if rel_pos < 0.15:
+            score += 0.3
+        elif rel_pos > 0.85:
+            score += 0.2
+        
+        # Length score (prefer medium length)
+        words = sentence.split()
+        if 12 <= len(words) <= 35:
+            score += 0.2
+        elif len(words) < 8 or len(words) > 50:
+            score -= 0.1
+        
+        # Importance signal score
+        for phrase in self.IMPORTANCE_SIGNALS['high']:
+            if phrase in sent_lower:
+                score += 0.4
+                break
+        
+        for phrase in self.IMPORTANCE_SIGNALS['medium']:
+            if phrase in sent_lower:
+                score += 0.2
+                break
+        
+        # Definition pattern score
+        for phrase in self.IMPORTANCE_SIGNALS['definition']:
+            if phrase in sent_lower:
+                score += 0.3
+                break
+        
+        return score
+    
+    def _extract_key_sentences(self, sentences: List[str], max_count: int = 5) -> List[str]:
+        """Extract most important sentences"""
+        if len(sentences) <= max_count:
+            return sentences
+        
+        # Score all sentences
+        scored = []
+        for i, sent in enumerate(sentences):
+            score = self._score_sentence(sent, i, len(sentences))
+            scored.append((i, sent, score))
+        
+        # Sort by score and select top
+        scored.sort(key=lambda x: -x[2])
+        selected = scored[:max_count]
+        
+        # Sort by position for coherent reading
+        selected.sort(key=lambda x: x[0])
+        
+        return [sent for _, sent, _ in selected]
+    
+    def _extract_examples(self, sentences: List[str], max_count: int = 3) -> List[str]:
+        """Extract example sentences from text"""
+        examples = []
+        
+        for sent in sentences:
+            sent_lower = sent.lower()
+            for phrase in self.IMPORTANCE_SIGNALS['example']:
+                if phrase in sent_lower:
+                    # Clean and add
+                    example = sent.strip()
+                    if example not in examples and len(example) > 20:
+                        examples.append(example)
+                        break
+            
+            if len(examples) >= max_count:
+                break
+        
+        return examples
+    
+    def _extract_definitions(self, sentences: List[str]) -> List[Dict[str, str]]:
+        """Extract term definitions from text"""
+        definitions = []
+        
+        # Patterns for definitions
+        patterns = [
+            r'(\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:is|are)\s+(?:a|an|the)?\s*(.+?)(?:\.|,)',
+            r'(\b[A-Z][a-zA-Z]+(?:\s+[a-zA-Z]+)*)\s+refers to\s+(.+?)(?:\.|,)',
+            r'(\b[A-Z][a-zA-Z]+(?:\s+[a-zA-Z]+)*)\s+means\s+(.+?)(?:\.|,)',
+            r'(\b[A-Z][a-zA-Z]+(?:\s+[a-zA-Z]+)*)\s+can be defined as\s+(.+?)(?:\.|,)',
+        ]
+        
+        for sent in sentences:
+            for pattern in patterns:
+                matches = re.findall(pattern, sent)
+                for term, definition in matches:
+                    term = term.strip()
+                    definition = definition.strip()
+                    
+                    # Validate
+                    if (len(term) > 2 and len(definition) > 10 and 
+                        len(definition) < 200 and
+                        term.lower() not in self.STOPWORDS):
+                        
+                        # Check not already added
+                        if not any(d['term'].lower() == term.lower() for d in definitions):
+                            definitions.append({
+                                'term': term,
+                                'meaning': definition[0].upper() + definition[1:] + '.' if not definition.endswith('.') else definition[0].upper() + definition[1:]
+                            })
+        
+        return definitions[:10]
+    
+    def _extract_vocabulary(self, text: str, sentences: List[str], max_terms: int = 8) -> List[Dict[str, str]]:
+        """Extract key vocabulary terms with context"""
+        # First try to find explicit definitions
+        definitions = self._extract_definitions(sentences)
+        
+        # Find additional key terms
+        text_lower = text.lower()
+        
+        # Extract capitalized terms (likely important)
+        terms = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
+        term_freq = Counter(terms)
+        
+        # Also extract technical terms
+        technical_patterns = [
+            r'\b([a-z]+(?:tion|ment|ity|ism|ology|graphy))\b',
+            r'\b([a-z]+\s+(?:system|method|process|model|theory|approach))\b',
+        ]
+        
+        for pattern in technical_patterns:
+            matches = re.findall(pattern, text_lower)
+            for term in matches:
+                term_freq[term.title()] += 1
+        
+        # Build vocabulary list
+        vocabulary = list(definitions)  # Start with found definitions
+        seen_terms = {d['term'].lower() for d in definitions}
+        
+        # Add high-frequency terms without definitions
+        for term, freq in term_freq.most_common(20):
+            if term.lower() in seen_terms or term.lower() in self.STOPWORDS:
+                continue
+            if len(term) < 3 or freq < 2:
+                continue
+            
+            # Find context sentence for this term
+            context = ""
+            for sent in sentences:
+                if term.lower() in sent.lower():
+                    context = sent
+                    break
+            
+            if context:
+                # Truncate if too long
+                if len(context) > 150:
+                    context = context[:150].rsplit(' ', 1)[0] + '...'
+                
+                vocabulary.append({
+                    'term': term,
+                    'meaning': context
+                })
+                seen_terms.add(term.lower())
+        
+        return vocabulary[:max_terms]
+    
+    def _generate_faq(self, text: str, sentences: List[str], concepts: List[str]) -> List[Dict[str, str]]:
+        """Generate FAQ based on content extraction"""
+        faq = []
+        
+        # Q1: What is the main topic?
+        if sentences:
+            # Use first substantial sentence as answer
+            main_answer = sentences[0] if len(sentences[0]) < 200 else sentences[0][:200] + '...'
+            main_topic = concepts[0] if concepts else "this topic"
+            faq.append({
+                'q': f"What is {main_topic}?",
+                'a': main_answer
+            })
+        
+        # Q2: Find a "why" answer
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if any(w in sent_lower for w in ['because', 'reason', 'purpose', 'important', 'significant']):
+                faq.append({
+                    'q': "Why is this important?",
+                    'a': sent if len(sent) < 200 else sent[:200] + '...'
+                })
+                break
+        
+        # Q3: Find a "how" answer
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if any(w in sent_lower for w in ['by', 'through', 'using', 'process', 'method', 'step']):
+                faq.append({
+                    'q': "How does this work?",
+                    'a': sent if len(sent) < 200 else sent[:200] + '...'
+                })
+                break
+        
+        # Q4: Key features/benefits
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if any(w in sent_lower for w in ['feature', 'benefit', 'advantage', 'allows', 'enables', 'provides']):
+                faq.append({
+                    'q': "What are the key benefits?",
+                    'a': sent if len(sent) < 200 else sent[:200] + '...'
+                })
+                break
+        
+        # Q5: Example
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if any(w in sent_lower for w in ['example', 'instance', 'such as', 'like']):
+                faq.append({
+                    'q': "Can you give an example?",
+                    'a': sent if len(sent) < 200 else sent[:200] + '...'
+                })
+                break
+        
+        return faq[:5]
+    
+    def _ai_generate(self, prompt: str, max_length: int = 150) -> str:
+        """Generate text using AI model (if available)"""
         if not self._load_model():
             return ""
         
@@ -217,9 +448,9 @@ class ContentEnhancer:
             outputs = self.model.generate(
                 **inputs,
                 max_length=max_length,
-                num_beams=num_beams,
-                temperature=temperature,
-                do_sample=temperature > 0,
+                num_beams=4,
+                temperature=0.3,
+                do_sample=True,
                 early_stopping=True
             )
             
@@ -227,302 +458,170 @@ class ContentEnhancer:
             return result.strip()
             
         except Exception as e:
-            print(f"[ContentEnhancer] Generation error: {e}")
+            print(f"[ContentEnhancer] AI generation error: {e}")
             return ""
     
-    def simplify(self, text: str, target_level: str = "high school") -> str:
-        """
-        Simplify complex text for easier understanding
+    def simplify(self, text: str) -> str:
+        """Create simplified explanation from text"""
+        clean_text = self._clean_text(text)
+        sentences = self._split_sentences(clean_text)
         
-        Args:
-            text: Complex text to simplify
-            target_level: "elementary", "middle school", "high school", "general"
-            
-        Returns:
-            Simplified explanation
-        """
-        # Better prompt for Flan-T5
-        prompt = f"Summarize and explain this simply: {text[:500]}"
-        result = self._generate(prompt, max_length=200)
-        return result if result else "This content explains the key topic and its main features."
-    
-    def elaborate(self, text: str) -> str:
-        """
-        Elaborate on brief content with more details
+        if not sentences:
+            return ""
         
-        Args:
-            text: Brief text to elaborate
-            
-        Returns:
-            More detailed explanation
-        """
-        prompt = f"Provide more details about: {text[:300]}"
-        result = self._generate(prompt, max_length=300)
-        return result if result else text
-    
-    def explain_like_im_5(self, text: str) -> str:
-        """
-        Generate ELI5 (Explain Like I'm 5) explanation
+        # Extract key sentences for summary
+        key_sents = self._extract_key_sentences(sentences, max_count=3)
         
-        Args:
-            text: Text to explain simply
+        if key_sents:
+            # Join into coherent summary
+            summary = ' '.join(key_sents)
             
-        Returns:
-            Very simple explanation
-        """
-        # Simple prompt that works well with Flan-T5
-        prompt = f"Explain this to a child: {text[:300]}"
-        result = self._generate(prompt, max_length=150)
-        return result if result else "This is about something interesting that helps people do things easier."
+            # If AI available, try to simplify further
+            if self.use_ai and len(summary) > 50:
+                ai_result = self._ai_generate(
+                    f"Explain this simply in 2-3 sentences: {summary[:500]}",
+                    max_length=150
+                )
+                if ai_result and len(ai_result) > 30:
+                    return ai_result
+            
+            return summary
+        
+        return sentences[0] if sentences else ""
     
     def generate_takeaways(self, text: str, num_points: int = 5) -> List[str]:
-        """
-        Generate key takeaways from content
+        """Extract key takeaways from text"""
+        clean_text = self._clean_text(text)
+        sentences = self._split_sentences(clean_text)
         
-        Args:
-            text: Source text
-            num_points: Number of takeaways to generate
-            
-        Returns:
-            List of key takeaway points
-        """
-        prompt = f"What are the main points? {text[:500]}"
-        result = self._generate(prompt, max_length=300)
+        if not sentences:
+            return []
         
-        if not result:
-            # Fallback: extract from original text
-            sentences = text.split('.')
-            return [s.strip() for s in sentences[:num_points] if len(s.strip()) > 10]
+        # Score and extract best sentences
+        key_sents = self._extract_key_sentences(sentences, max_count=num_points + 2)
         
-        # Parse into list
         takeaways = []
-        lines = result.replace('. ', '.\n').split('\n')
-        for line in lines:
-            line = line.strip()
-            # Remove numbering
-            line = re.sub(r'^[\d\.\)\-\*]+\s*', '', line)
-            if line and len(line) > 10:
-                takeaways.append(line)
+        for sent in key_sents:
+            # Clean up the sentence
+            takeaway = sent.strip()
+            if takeaway and len(takeaway) > 15:
+                # Ensure proper formatting
+                if not takeaway[0].isupper():
+                    takeaway = takeaway[0].upper() + takeaway[1:]
+                if not takeaway.endswith(('.', '!', '?')):
+                    takeaway += '.'
+                takeaways.append(takeaway)
         
-        # If no proper list, split by sentences
-        if not takeaways:
-            sentences = re.split(r'[.!?]+', result)
-            takeaways = [s.strip() for s in sentences if len(s.strip()) > 10]
-        
-        return takeaways[:num_points] if takeaways else ["Key information is presented in the content."]
+        return takeaways[:num_points]
     
-    def generate_examples(self, concept: str, num_examples: int = 3) -> List[str]:
-        """
-        Generate real-world examples for a concept
+    def elaborate(self, text: str) -> str:
+        """Create elaboration of the content"""
+        clean_text = self._clean_text(text)
+        sentences = self._split_sentences(clean_text)
         
-        Args:
-            concept: The concept to exemplify
-            num_examples: Number of examples to generate
-            
-        Returns:
-            List of examples
-        """
-        prompt = f"Give examples of: {concept[:200]}"
-        result = self._generate(prompt, max_length=250)
+        if not sentences:
+            return ""
         
-        if not result:
-            return [f"Example: {concept} is used in everyday applications."]
+        # Find sentences with definitions or explanations
+        elaboration_sents = []
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if any(phrase in sent_lower for phrase in self.IMPORTANCE_SIGNALS['definition']):
+                elaboration_sents.append(sent)
+            elif any(phrase in sent_lower for phrase in ['means', 'explains', 'describes', 'shows']):
+                elaboration_sents.append(sent)
         
-        # Parse examples
-        examples = []
-        lines = result.replace('. ', '.\n').split('\n')
-        for line in lines:
-            line = line.strip()
-            line = re.sub(r'^[\d\.\)\-\*]+\s*', '', line)
-            if line and len(line) > 10:
-                examples.append(line)
+        if elaboration_sents:
+            return ' '.join(elaboration_sents[:3])
         
-        return examples[:num_examples] if examples else [result]
+        # Fallback: return first few sentences
+        return ' '.join(sentences[:2])
+    
+    def generate_examples(self, text: str, num_examples: int = 3) -> List[str]:
+        """Extract examples from text"""
+        clean_text = self._clean_text(text)
+        sentences = self._split_sentences(clean_text)
+        
+        examples = self._extract_examples(sentences, num_examples)
+        
+        # If not enough examples found, add relevant sentences
+        if len(examples) < num_examples:
+            for sent in sentences:
+                if sent not in examples and len(sent) > 30:
+                    examples.append(sent)
+                if len(examples) >= num_examples:
+                    break
+        
+        return examples[:num_examples]
     
     def generate_faq(self, text: str, num_questions: int = 5) -> List[Dict[str, str]]:
-        """
-        Generate FAQ from content
+        """Generate FAQ from text"""
+        clean_text = self._clean_text(text)
+        sentences = self._split_sentences(clean_text)
         
-        Args:
-            text: Source text
-            num_questions: Number of Q&A pairs
-            
-        Returns:
-            List of {'q': question, 'a': answer} dicts
-        """
-        text_short = text[:500]
+        # Extract main concepts
+        concepts = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
+        concepts = list(dict.fromkeys(concepts))[:5]  # Unique, max 5
         
-        # Generate Q&A pairs one by one for better quality
-        faq = []
-        
-        # Q1: What is it?
-        q1 = "What is this about?"
-        a1 = self._generate(f"Answer: What is this about? {text_short}", max_length=100)
-        if a1:
-            faq.append({'q': q1, 'a': a1})
-        
-        # Q2: How does it work?
-        q2 = "How does it work?"
-        a2 = self._generate(f"Answer: How does this work? {text_short}", max_length=100)
-        if a2:
-            faq.append({'q': q2, 'a': a2})
-        
-        # Q3: Why is it important?
-        q3 = "Why is this important?"
-        a3 = self._generate(f"Answer: Why is this important? {text_short}", max_length=100)
-        if a3:
-            faq.append({'q': q3, 'a': a3})
-        
-        # Q4: What are the key features?
-        q4 = "What are the key features?"
-        a4 = self._generate(f"What are the features? {text_short}", max_length=100)
-        if a4:
-            faq.append({'q': q4, 'a': a4})
-        
-        return faq[:num_questions]
+        return self._generate_faq(clean_text, sentences, concepts)
     
-    def extract_vocabulary(self, text: str, num_terms: int = 10) -> List[Dict[str, str]]:
-        """
-        Extract and define key vocabulary terms
+    def extract_vocabulary(self, text: str, num_terms: int = 8) -> List[Dict[str, str]]:
+        """Extract vocabulary terms with definitions"""
+        clean_text = self._clean_text(text)
+        sentences = self._split_sentences(clean_text)
         
-        Args:
-            text: Source text
-            num_terms: Number of terms to extract
-            
-        Returns:
-            List of {'term': word, 'meaning': definition}
-        """
-        # Find potential vocabulary (capitalized terms, technical words)
-        words = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
-        technical = re.findall(r'\b([a-z]+(?:tion|ment|ity|ism|ology|graphy|ing))\b', text.lower())
-        
-        # Combine and deduplicate
-        candidates = list(dict.fromkeys(words + [t.title() for t in technical]))[:num_terms * 2]
-        
-        vocabulary = []
-        for term in candidates[:num_terms]:
-            if len(term) < 3:
-                continue
-            prompt = f"Define {term}:"
-            definition = self._generate(prompt, max_length=80)
-            if definition and len(definition) > 5:
-                vocabulary.append({
-                    'term': term,
-                    'meaning': definition
-                })
-            else:
-                # Fallback definition
-                vocabulary.append({
-                    'term': term,
-                    'meaning': f"A key term related to the main topic."
-                })
-        
-        return vocabulary[:num_terms]
-    
-    def generate_analogy(self, concept: str) -> str:
-        """
-        Generate an analogy to explain a concept
-        
-        Args:
-            concept: Concept to explain
-            
-        Returns:
-            Analogy explanation
-        """
-        prompt = f"Explain {concept} using a simple everyday analogy:"
-        return self._generate(prompt, max_length=150)
-    
-    def summarize_for_audience(
-        self,
-        text: str,
-        audience: str = "general"
-    ) -> str:
-        """
-        Summarize text for specific audience
-        
-        Args:
-            text: Text to summarize
-            audience: "expert", "professional", "student", "general", "child"
-            
-        Returns:
-            Audience-appropriate summary
-        """
-        prompts = {
-            'expert': f"Summarize this for an expert audience with technical details: {text}",
-            'professional': f"Summarize this for business professionals: {text}",
-            'student': f"Summarize this for a student studying the topic: {text}",
-            'general': f"Summarize this for a general audience in simple terms: {text}",
-            'child': f"Summarize this for a child in very simple words: {text}"
-        }
-        
-        prompt = prompts.get(audience, prompts['general'])
-        return self._generate(prompt, max_length=200)
+        return self._extract_vocabulary(clean_text, sentences, num_terms)
     
     def enhance_content(self, text: str, title: str = "Content") -> GeneratedContent:
         """
         Generate all enhanced content for a text
         
-        Args:
-            text: Source text
-            title: Content title
-            
-        Returns:
-            GeneratedContent with all generated sections
+        Uses extraction-first approach for accuracy,
+        with optional AI enhancement.
         """
         print(f"\n🔄 Generating enhanced content...")
         
-        # Clean text first - remove transcript metadata
-        clean_text = self._clean_input_text(text)
+        clean_text = self._clean_text(text)
         
-        # Truncate if too long
-        text_short = clean_text[:1000] if len(clean_text) > 1000 else clean_text
-        
-        if not text_short or len(text_short) < 20:
+        if not clean_text or len(clean_text) < 20:
             print("   ⚠️ Not enough content to enhance")
             return GeneratedContent(
                 original=text,
                 simplified_explanation="",
                 key_takeaways=[],
                 elaboration="",
-                eli5_explanation="",
                 examples=[],
                 faq=[],
                 vocabulary=[]
             )
         
-        print(f"   📄 Processing {len(text_short)} characters...")
+        print(f"   📄 Processing {len(clean_text)} characters...")
         
-        print("   📝 Generating simplified explanation...")
-        simplified = self.simplify(text_short)
+        print("   📝 Extracting simplified explanation...")
+        simplified = self.simplify(clean_text)
         
-        print("   🎯 Generating key takeaways...")
-        takeaways = self.generate_takeaways(text_short, 5)
+        print("   🎯 Extracting key takeaways...")
+        takeaways = self.generate_takeaways(clean_text, 5)
         
-        print("   📖 Generating elaboration...")
-        elaboration = self.elaborate(text_short[:500])
+        print("   📖 Creating elaboration...")
+        elaboration = self.elaborate(clean_text)
         
-        print("   👶 Generating ELI5 explanation...")
-        eli5 = self.explain_like_im_5(text_short[:300])
-        
-        print("   💡 Generating examples...")
-        # Extract main concept for examples
-        first_sentence = text_short.split('.')[0] if '.' in text_short else text_short[:100]
-        examples = self.generate_examples(first_sentence, 3)
+        print("   💡 Finding examples...")
+        examples = self.generate_examples(clean_text, 3)
         
         print("   ❓ Generating FAQ...")
-        faq = self.generate_faq(text_short, 4)
+        faq = self.generate_faq(clean_text, 5)
         
         print("   📚 Extracting vocabulary...")
         vocabulary = self.extract_vocabulary(clean_text, 8)
         
-        print("   ✅ Content generation complete!")
+        print("   ✅ Content enhancement complete!")
         
         return GeneratedContent(
             original=text,
             simplified_explanation=simplified,
             key_takeaways=takeaways,
             elaboration=elaboration,
-            eli5_explanation=eli5,
             examples=examples,
             faq=faq,
             vocabulary=vocabulary
@@ -530,156 +629,44 @@ class ContentEnhancer:
 
 
 class OfflineContentGenerator:
-    """
-    Fallback generator when transformers not available
-    Uses rule-based methods for content generation
-    """
+    """Alias for backward compatibility"""
     
-    def __init__(self):
-        self.stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'this', 'that', 'it', 'they', 'we', 'you', 'he', 'she'
-        }
+    def __init__(self, model_name: str = "google/flan-t5-base"):
+        self._enhancer = ContentEnhancer(use_ai=True, model_name=model_name)
     
-    def simplify(self, text: str) -> str:
-        """Simple rule-based simplification"""
-        sentences = re.split(r'[.!?]+', text)
-        simplified = []
-        
-        for sent in sentences[:3]:
-            sent = sent.strip()
-            if len(sent) > 10:
-                # Keep shorter sentences
-                words = sent.split()
-                if len(words) > 20:
-                    sent = ' '.join(words[:20]) + '...'
-                simplified.append(sent)
-        
-        return '. '.join(simplified) + '.' if simplified else text[:200]
+    def simplify(self, text: str, target_level: str = "high school") -> str:
+        return self._enhancer.simplify(text)
     
-    def generate_takeaways(self, text: str, num: int = 5) -> List[str]:
-        """Extract key sentences as takeaways"""
-        sentences = re.split(r'[.!?]+', text)
-        
-        # Score sentences
-        scored = []
-        for sent in sentences:
-            sent = sent.strip()
-            if len(sent) > 20:
-                # Score by position and keywords
-                score = 0
-                if 'important' in sent.lower() or 'key' in sent.lower():
-                    score += 2
-                if sentences.index(sent + '.') == 0:
-                    score += 1
-                scored.append((score, sent))
-        
-        scored.sort(reverse=True)
-        return [s for _, s in scored[:num]]
+    def elaborate(self, text: str) -> str:
+        return self._enhancer.elaborate(text)
     
-    def generate_questions(self, text: str, num: int = 5) -> List[Dict[str, str]]:
-        """Generate simple questions from content"""
-        sentences = re.split(r'[.!?]+', text)
-        questions = []
-        
-        templates = [
-            ("What is", "?"),
-            ("How does", " work?"),
-            ("Why is", " important?"),
-            ("What are the features of", "?"),
-            ("Explain", "."),
-        ]
-        
-        # Extract nouns/concepts
-        concepts = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
-        
-        for i, concept in enumerate(concepts[:num]):
-            template = templates[i % len(templates)]
-            q = f"{template[0]} {concept}{template[1]}"
-            
-            # Find answer in text
-            answer = ""
-            for sent in sentences:
-                if concept.lower() in sent.lower():
-                    answer = sent.strip()
-                    break
-            
-            questions.append({'q': q, 'a': answer or f"See the content about {concept}."})
-        
-        return questions
+    def explain_like_im_5(self, text: str) -> str:
+        return self._enhancer.simplify(text)
     
-    def extract_vocabulary(self, text: str, num: int = 8) -> List[Dict[str, str]]:
-        """Extract vocabulary with simple definitions"""
-        # Find capitalized terms and technical words
-        terms = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
-        unique_terms = list(dict.fromkeys(terms))  # Remove duplicates, keep order
-        
-        vocab = []
-        sentences = text.split('.')
-        
-        for term in unique_terms[:num]:
-            # Find definition in context
-            definition = f"A concept related to {term.lower()}"
-            for sent in sentences:
-                if term in sent:
-                    # Use the sentence as context
-                    definition = sent.strip()[:100]
-                    break
-            
-            vocab.append({'term': term, 'meaning': definition})
-        
-        return vocab
+    def generate_takeaways(self, text: str, num_points: int = 5) -> List[str]:
+        return self._enhancer.generate_takeaways(text, num_points)
+    
+    def generate_examples(self, concept: str, num_examples: int = 3) -> List[str]:
+        return self._enhancer.generate_examples(concept, num_examples)
+    
+    def generate_faq(self, text: str, num_questions: int = 5) -> List[Dict[str, str]]:
+        return self._enhancer.generate_faq(text, num_questions)
+    
+    def extract_vocabulary(self, text: str, num_terms: int = 10) -> List[Dict[str, str]]:
+        return self._enhancer.extract_vocabulary(text, num_terms)
     
     def enhance_content(self, text: str, title: str = "Content") -> GeneratedContent:
-        """Generate enhanced content using rules"""
-        print("\n🔄 Generating enhanced content (rule-based)...")
-        
-        simplified = self.simplify(text)
-        takeaways = self.generate_takeaways(text, 5)
-        faq = self.generate_questions(text, 4)
-        vocabulary = self.extract_vocabulary(text, 8)
-        
-        # Simple elaboration
-        sentences = text.split('.')[:2]
-        elaboration = '. '.join(s.strip() for s in sentences if s.strip()) + '.'
-        
-        # Simple ELI5
-        first_sent = text.split('.')[0] if '.' in text else text[:100]
-        eli5 = f"This is about {first_sent.lower().strip()}."
-        
-        # Simple examples placeholder
-        concepts = re.findall(r'\b([A-Z][a-z]+)\b', text)[:3]
-        examples = [f"Example of {c}: Common usage in everyday context." for c in concepts]
-        
-        return GeneratedContent(
-            original=text,
-            simplified_explanation=simplified,
-            key_takeaways=takeaways,
-            elaboration=elaboration,
-            eli5_explanation=eli5,
-            examples=examples,
-            faq=faq,
-            vocabulary=vocabulary
-        )
+        return self._enhancer.enhance_content(text, title)
 
 
-def get_content_enhancer(use_ai: bool = True) -> ContentEnhancer:
+def get_content_enhancer(use_ai: bool = False) -> ContentEnhancer:
     """
-    Get the appropriate content enhancer
+    Factory function to get content enhancer
     
     Args:
-        use_ai: Whether to use AI models (requires transformers)
+        use_ai: Whether to enable AI-powered generation
         
     Returns:
-        ContentEnhancer or OfflineContentGenerator
+        ContentEnhancer instance
     """
-    if use_ai:
-        try:
-            import transformers
-            return ContentEnhancer()
-        except ImportError:
-            print("⚠️ transformers not available, using rule-based generator")
-            return OfflineContentGenerator()
-    else:
-        return OfflineContentGenerator()
+    return ContentEnhancer(use_ai=use_ai)
