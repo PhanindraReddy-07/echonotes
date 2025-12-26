@@ -78,6 +78,36 @@ for dir_path in [settings.UPLOAD_DIR, settings.OUTPUT_DIR, settings.TEMP_DIR]:
     dir_path.mkdir(parents=True, exist_ok=True)
 
 
+# ============== Helper Functions ==============
+
+def extract_transcription_data(result) -> dict:
+    """
+    Extract data from TranscriptionResult object or dict.
+    
+    Handles both:
+    - TranscriptionResult object (from Transcriber)
+    - Dict (legacy format)
+    """
+    if hasattr(result, 'text'):
+        # It's a TranscriptionResult object
+        return {
+            "text": result.text,
+            "confidence": getattr(result, 'avg_confidence', 0),
+            "duration": getattr(result, 'duration', 0),
+            "word_count": getattr(result, 'word_count', len(result.text.split())),
+            "segments": [u.to_dict() for u in getattr(result, 'utterances', [])] if hasattr(result, 'utterances') else []
+        }
+    else:
+        # It's a dict
+        return {
+            "text": result.get("text", ""),
+            "confidence": result.get("confidence", 0),
+            "duration": result.get("duration", 0),
+            "word_count": len(result.get("text", "").split()),
+            "segments": result.get("segments", [])
+        }
+
+
 # ============== Models ==============
 
 class JobStatus(str, Enum):
@@ -256,23 +286,19 @@ async def save_upload_file(file: UploadFile) -> Path:
 async def process_transcription(job_id: str, audio_path: Path, language: str):
     """Background task for transcription"""
     try:
-        from speech.transcriber import SpeechTranscriber
+        from speech.transcriber import Transcriber
         
         update_job(job_id, JobStatus.PROCESSING)
         
-        # Initialize transcriber
-        transcriber = SpeechTranscriber()
+        # Initialize transcriber (auto-download model if needed)
+        model_path = Transcriber.get_or_download_model('en-us-small')
+        transcriber = Transcriber(model_path=model_path)
         
         # Transcribe
         result = transcriber.transcribe(str(audio_path))
+        result_data = extract_transcription_data(result)
         
-        update_job(job_id, JobStatus.COMPLETED, result={
-            "text": result.get("text", ""),
-            "confidence": result.get("confidence", 0),
-            "duration": result.get("duration", 0),
-            "word_count": len(result.get("text", "").split()),
-            "segments": result.get("segments", [])
-        })
+        update_job(job_id, JobStatus.COMPLETED, result=result_data)
         
     except Exception as e:
         import traceback
@@ -291,7 +317,7 @@ async def process_full_pipeline(
 ):
     """Background task for full pipeline processing"""
     try:
-        from speech.transcriber import SpeechTranscriber
+        from speech.transcriber import Transcriber
         from document.smart_generator import SmartDocumentGenerator
         
         update_job(job_id, JobStatus.PROCESSING)
@@ -308,9 +334,11 @@ async def process_full_pipeline(
                 print("[API] Audio enhancer not available, skipping enhancement")
         
         # Step 2: Transcription
-        transcriber = SpeechTranscriber()
+        model_path = Transcriber.get_or_download_model('en-us-small')
+        transcriber = Transcriber(model_path=model_path)
         transcript_result = transcriber.transcribe(str(audio_path))
-        text = transcript_result.get("text", "")
+        result_data = extract_transcription_data(transcript_result)
+        text = result_data["text"]
         
         if not text:
             raise ValueError("Transcription failed - no text generated")
@@ -330,8 +358,8 @@ async def process_full_pipeline(
         
         update_job(job_id, JobStatus.COMPLETED, result={
             "transcript": text,
-            "confidence": transcript_result.get("confidence", 0),
-            "duration": transcript_result.get("duration", 0),
+            "confidence": result_data["confidence"],
+            "duration": result_data["duration"],
             "document_path": str(output_path),
             "format": format.value,
             "ai_enhanced": use_ai
@@ -381,7 +409,7 @@ async def health_check():
         pass
     
     try:
-        from speech.transcriber import SpeechTranscriber
+        from speech.transcriber import Transcriber
         modules["speech_transcriber"] = True
     except:
         pass
@@ -498,18 +526,20 @@ async def transcribe_audio_sync(
     filepath = await save_upload_file(file)
     
     try:
-        from speech.transcriber import SpeechTranscriber
+        from speech.transcriber import Transcriber
         
-        # Transcribe
-        transcriber = SpeechTranscriber()
+        # Transcribe (auto-download model if needed)
+        model_path = Transcriber.get_or_download_model('en-us-small')
+        transcriber = Transcriber(model_path=model_path)
         result = transcriber.transcribe(str(filepath))
+        result_data = extract_transcription_data(result)
         
         return TranscriptionResult(
-            text=result.get("text", ""),
-            confidence=result.get("confidence", 0),
-            duration=result.get("duration", 0),
-            word_count=len(result.get("text", "").split()),
-            segments=result.get("segments", [])
+            text=result_data["text"],
+            confidence=result_data["confidence"],
+            duration=result_data["duration"],
+            word_count=result_data["word_count"],
+            segments=result_data["segments"]
         )
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"Module not found: {str(e)}")
@@ -721,14 +751,16 @@ async def process_audio_sync(
     job_id = str(uuid.uuid4())[:8]
     
     try:
-        from speech.transcriber import SpeechTranscriber
+        from speech.transcriber import Transcriber
         from nlp.smart_analyzer import SmartAnalyzer
         from document.smart_generator import SmartDocumentGenerator
         
-        # Step 1: Transcribe
-        transcriber = SpeechTranscriber()
+        # Step 1: Transcribe (auto-download model if needed)
+        model_path = Transcriber.get_or_download_model('en-us-small')
+        transcriber = Transcriber(model_path=model_path)
         transcript_result = transcriber.transcribe(str(filepath))
-        text = transcript_result.get("text", "")
+        result_data = extract_transcription_data(transcript_result)
+        text = result_data["text"]
         
         if not text:
             raise HTTPException(status_code=400, detail="Transcription failed")
@@ -762,8 +794,8 @@ async def process_audio_sync(
             "status": "completed",
             "transcript": {
                 "text": text,
-                "confidence": transcript_result.get("confidence", 0),
-                "duration": transcript_result.get("duration", 0),
+                "confidence": result_data["confidence"],
+                "duration": result_data["duration"],
                 "word_count": len(text.split())
             },
             "analysis": {
@@ -772,7 +804,8 @@ async def process_audio_sync(
                 "related_topics": analysis.related_topics
             },
             "document": {
-                "path": f"/api/download/{job_id}",
+                "job_id": job_id,
+                "document_path": f"/api/download/{job_id}",
                 "format": format.value,
                 "filename": output_filename
             }

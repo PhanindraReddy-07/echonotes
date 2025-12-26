@@ -190,7 +190,7 @@
             ),
         };
         
-        // ============== Audio Recorder Hook ==============
+        // ============== Audio Recorder Hook (WAV format - no ffmpeg needed) ==============
         const useAudioRecorder = () => {
             const [isRecording, setIsRecording] = useState(false);
             const [audioBlob, setAudioBlob] = useState(null);
@@ -198,36 +198,85 @@
             const [duration, setDuration] = useState(0);
             const [error, setError] = useState(null);
             
-            const mediaRecorderRef = useRef(null);
+            const audioContextRef = useRef(null);
+            const processorRef = useRef(null);
+            const streamRef = useRef(null);
             const chunksRef = useRef([]);
             const timerRef = useRef(null);
+            
+            // Convert Float32 samples to 16-bit PCM WAV
+            const encodeWAV = (samples, sampleRate) => {
+                const buffer = new ArrayBuffer(44 + samples.length * 2);
+                const view = new DataView(buffer);
+                
+                // WAV header
+                const writeString = (offset, string) => {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
+                    }
+                };
+                
+                writeString(0, 'RIFF');
+                view.setUint32(4, 36 + samples.length * 2, true);
+                writeString(8, 'WAVE');
+                writeString(12, 'fmt ');
+                view.setUint32(16, 16, true); // PCM format
+                view.setUint16(20, 1, true);  // PCM
+                view.setUint16(22, 1, true);  // Mono
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * 2, true); // byte rate
+                view.setUint16(32, 2, true);  // block align
+                view.setUint16(34, 16, true); // bits per sample
+                writeString(36, 'data');
+                view.setUint32(40, samples.length * 2, true);
+                
+                // Convert samples to 16-bit PCM
+                let offset = 44;
+                for (let i = 0; i < samples.length; i++) {
+                    const s = Math.max(-1, Math.min(1, samples[i]));
+                    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                    offset += 2;
+                }
+                
+                return new Blob([buffer], { type: 'audio/wav' });
+            };
             
             const startRecording = async () => {
                 try {
                     setError(null);
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    
-                    const mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
-                    
-                    mediaRecorderRef.current = mediaRecorder;
                     chunksRef.current = [];
                     
-                    mediaRecorder.ondataavailable = (e) => {
-                        if (e.data.size > 0) {
-                            chunksRef.current.push(e.data);
-                        }
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        } 
+                    });
+                    streamRef.current = stream;
+                    
+                    // Create audio context at 16kHz (optimal for speech recognition)
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
+                    audioContextRef.current = audioContext;
+                    
+                    const source = audioContext.createMediaStreamSource(stream);
+                    
+                    // Use ScriptProcessor for recording (widely supported)
+                    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+                    processorRef.current = processor;
+                    
+                    processor.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        // Copy the samples
+                        chunksRef.current.push(new Float32Array(inputData));
                     };
                     
-                    mediaRecorder.onstop = () => {
-                        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-                        setAudioBlob(blob);
-                        setAudioUrl(URL.createObjectURL(blob));
-                        stream.getTracks().forEach(track => track.stop());
-                    };
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
                     
-                    mediaRecorder.start(100);
                     setIsRecording(true);
                     setDuration(0);
                     
@@ -242,10 +291,40 @@
             };
             
             const stopRecording = () => {
-                if (mediaRecorderRef.current && isRecording) {
-                    mediaRecorderRef.current.stop();
-                    setIsRecording(false);
-                    clearInterval(timerRef.current);
+                if (!isRecording) return;
+                
+                // Stop timer
+                clearInterval(timerRef.current);
+                setIsRecording(false);
+                
+                // Disconnect processor
+                if (processorRef.current) {
+                    processorRef.current.disconnect();
+                }
+                
+                // Stop stream
+                if (streamRef.current) {
+                    streamRef.current.getTracks().forEach(track => track.stop());
+                }
+                
+                // Close audio context
+                if (audioContextRef.current) {
+                    const sampleRate = audioContextRef.current.sampleRate;
+                    audioContextRef.current.close();
+                    
+                    // Combine all chunks into one Float32Array
+                    const totalLength = chunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+                    const combined = new Float32Array(totalLength);
+                    let offset = 0;
+                    for (const chunk of chunksRef.current) {
+                        combined.set(chunk, offset);
+                        offset += chunk.length;
+                    }
+                    
+                    // Convert to WAV blob
+                    const wavBlob = encodeWAV(combined, sampleRate);
+                    setAudioBlob(wavBlob);
+                    setAudioUrl(URL.createObjectURL(wavBlob));
                 }
             };
             
@@ -254,6 +333,7 @@
                 setAudioUrl(null);
                 setDuration(0);
                 setError(null);
+                chunksRef.current = [];
             };
             
             return {
@@ -386,7 +466,7 @@
             
             const handleUseRecording = () => {
                 if (recorder.audioBlob) {
-                    const file = new File([recorder.audioBlob], 'recording.webm', { type: 'audio/webm' });
+                    const file = new File([recorder.audioBlob], 'recording.wav', { type: 'audio/wav' });
                     onAudioReady(file);
                 }
             };

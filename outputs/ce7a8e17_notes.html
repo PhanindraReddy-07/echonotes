@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EchoNotes Document</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .header .meta { opacity: 0.9; font-size: 0.95em; }
+        .content { padding: 40px; }
+        .section {
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 2px solid #eee;
+        }
+        .section:last-child { border-bottom: none; }
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #333;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+        }
+        .section-title .icon { font-size: 1.2em; }
+        .summary-box {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%);
+            padding: 25px;
+            border-radius: 12px;
+            font-size: 1.1em;
+            line-height: 1.7;
+            border-left: 5px solid #667eea;
+        }
+        .key-sentence {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+            transition: transform 0.2s;
+        }
+        .key-sentence:hover { transform: translateX(5px); }
+        .concept-card {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            transition: all 0.3s;
+        }
+        .concept-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.2);
+        }
+        .concept-title {
+            font-size: 1.2em;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        .concept-stars { color: #ffc107; letter-spacing: 2px; }
+        .concept-def {
+            color: #666;
+            line-height: 1.6;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .question-card {
+            background: #fff3e0;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+        .question-text {
+            font-size: 1.1em;
+            color: #333;
+            margin-bottom: 12px;
+        }
+        .question-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9em;
+        }
+        .difficulty {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        .difficulty.easy { background: #d4edda; color: #155724; }
+        .difficulty.medium { background: #fff3cd; color: #856404; }
+        .difficulty.hard { background: #f8d7da; color: #721c24; }
+        .hint {
+            color: #666;
+            font-style: italic;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 6px;
+        }
+        .topic-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .topic-tag {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-size: 0.95em;
+            transition: transform 0.2s;
+        }
+        .topic-tag:hover { transform: scale(1.05); }
+        .action-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 15px;
+            background: #e8f5e9;
+            border-radius: 8px;
+            margin: 8px 0;
+        }
+        .action-item input { width: 18px; height: 18px; }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #f8f9fa;
+            color: #666;
+            font-size: 0.9em;
+        }
+        details {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📝 EchoNotes Document</h1>
+            <div class="meta">
+                <strong>Generated:</strong> 2025-12-26 17:34 | 
+                <strong>Words:</strong> 25 | 
+                <strong>Reading Time:</strong> 0.1 min
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h2 class="section-title"><span class="icon">📋</span> Executive Summary</h2>
+                <div class="summary-box">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is the hot cross bun.</div>
+            </div>
+            
+            <div class="section">
+                <h2 class="section-title"><span class="icon">🔑</span> Key Sentences</h2>
+                <div class="key-sentence">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is the hot cross bun.</div>
+
+            </div>
+            
+            <div class="section">
+                <h2 class="section-title"><span class="icon">💡</span> Key Concepts</h2>
+                <div class="concept-card">
+                    <div class="concept-title">Stale</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Smell</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Beer</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Lingers</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Takes</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Heed</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Odour</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+                <div class="concept-card">
+                    <div class="concept-title">Cold</div>
+                    <div class="concept-stars">★★★★★</div>
+                    <div class="concept-def">The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health and zest a sour pickle tastes fine with him tackles our past or are my favourite is just for food is</div>
+                </div>
+
+            </div>
+            
+            <div class="section">
+                <h2 class="section-title"><span class="icon">❓</span> Study Questions</h2>
+                <div class="question-card">
+                    <div class="question-text"><strong>1.</strong> What is Stale?</div>
+                    <div class="question-meta">
+                        <span class="difficulty easy">EASY</span>
+                        <span>Type: Factual</span>
+                    </div>
+                    <div class="hint">💡 Hint: The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health ...</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>2.</strong> Define Smell in your own words.</div>
+                    <div class="question-meta">
+                        <span class="difficulty easy">EASY</span>
+                        <span>Type: Factual</span>
+                    </div>
+                    <div class="hint">💡 Hint: The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health ...</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>3.</strong> Explain what Beer means.</div>
+                    <div class="question-meta">
+                        <span class="difficulty easy">EASY</span>
+                        <span>Type: Factual</span>
+                    </div>
+                    <div class="hint">💡 Hint: The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health ...</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>4.</strong> What is Lingers?</div>
+                    <div class="question-meta">
+                        <span class="difficulty easy">EASY</span>
+                        <span>Type: Factual</span>
+                    </div>
+                    <div class="hint">💡 Hint: The stale smell of aud beer lingers it takes heed to bring out the odour a cold dip restores health ...</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>5.</strong> Why is Stale significant?</div>
+                    <div class="question-meta">
+                        <span class="difficulty medium">MEDIUM</span>
+                        <span>Type: Conceptual</span>
+                    </div>
+                    <div class="hint">💡 Hint: Consider its role and impact discussed in the content.</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>6.</strong> Compare Stale and Smell.</div>
+                    <div class="question-meta">
+                        <span class="difficulty medium">MEDIUM</span>
+                        <span>Type: Analytical</span>
+                    </div>
+                    <div class="hint">💡 Hint: Look for similarities and differences in their descriptions.</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>7.</strong> Give an example of Stale in practice.</div>
+                    <div class="question-meta">
+                        <span class="difficulty hard">HARD</span>
+                        <span>Type: Application</span>
+                    </div>
+                    <div class="hint">💡 Hint: Think about real-world scenarios where this applies.</div>
+                </div>
+                <div class="question-card">
+                    <div class="question-text"><strong>8.</strong> What are the advantages and disadvantages of Stale?</div>
+                    <div class="question-meta">
+                        <span class="difficulty hard">HARD</span>
+                        <span>Type: Analytical</span>
+                    </div>
+                    <div class="hint">💡 Hint: Consider both positive and negative aspects.</div>
+                </div>
+
+            </div>
+            
+            <div class="section">
+                <h2 class="section-title"><span class="icon">🔗</span> Related Topics</h2>
+                <div class="topic-tags">
+                </div>
+            </div>
+
+            <div class="section" style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); margin: 20px -40px; padding: 40px;">
+                <h2 class="section-title"><span class="icon">🎯</span> Simple Explanation</h2>
+                <div class="summary-box" style="background: white; border-left-color: #4caf50;">
+                    This content explains the key topic and its main features.
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">📝</span> Key Takeaways</h2>
+                <div style="display: grid; gap: 12px;">
+                    <div style="background: #e3f2fd; padding: 15px 20px; border-radius: 8px; display: flex; gap: 12px; align-items: flex-start;">
+                        <span style="background: #1976d2; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0;">1</span>
+                        <span>a sour pickle tastes fine with aud</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">💡</span> Real-World Examples</h2>
+                <div style="background: #f3e5f5; padding: 20px; border-radius: 12px; margin: 10px 0; border-left: 4px solid #9c27b0;">
+                    <strong style="color: #7b1fa2;">Example 1:</strong> a cold dip restores health
+                </div>
+            </div>
+
+            <div class="section" style="background: #fff3e0; margin: 20px -40px; padding: 40px;">
+                <h2 class="section-title"><span class="icon">❔</span> Frequently Asked Questions</h2>
+                <div style="background: white; padding: 20px; border-radius: 12px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="font-weight: 600; color: #e65100; margin-bottom: 10px;">Q1: What is this about?</div>
+                    <div style="color: #555; padding-left: 20px; border-left: 3px solid #ff9800;">Science/Tech</div>
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 12px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="font-weight: 600; color: #e65100; margin-bottom: 10px;">Q2: How does it work?</div>
+                    <div style="color: #555; padding-left: 20px; border-left: 3px solid #ff9800;">hot cross bun is my favourite is just for food is the hot cross bun</div>
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 12px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="font-weight: 600; color: #e65100; margin-bottom: 10px;">Q3: Why is this important?</div>
+                    <div style="color: #555; padding-left: 20px; border-left: 3px solid #ff9800;">the hot cross bun</div>
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 12px; margin: 15px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="font-weight: 600; color: #e65100; margin-bottom: 10px;">Q4: What are the key features?</div>
+                    <div style="color: #555; padding-left: 20px; border-left: 3px solid #ff9800;">stale smell of aud beer</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">📚</span> Vocabulary</h2>
+                <div style="display: grid; gap: 10px;">
+                    <div style="background: #fafafa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
+                        <strong style="color: #1976d2;">Bring</strong>: Define Bring:
+                    </div>
+                </div>
+            </div>
+
+            <div style="text-align: center; padding: 20px; margin-top: 20px;">
+                <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 25px; border-radius: 25px; font-size: 0.9em;">
+                    🤖 AI-Enhanced Document
+                </span>
+            </div>
+
+        </div>
+        
+        <div class="footer">
+            Generated by EchoNotes - Speech to Document System
+        </div>
+    </div>
+</body>
+</html>

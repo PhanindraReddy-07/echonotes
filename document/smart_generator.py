@@ -16,7 +16,6 @@ Generates structured documents with:
 NEW - AI Enhanced Sections:
 - Simplified Explanation
 - Key Takeaways
-- ELI5 (Explain Like I'm 5)
 - Real-world Examples
 - FAQ (Auto-generated Q&A)
 - Vocabulary with Definitions
@@ -48,7 +47,6 @@ class SmartDocumentGenerator:
     NEW: AI-powered content generation for:
     - Simplified explanations
     - Key takeaways
-    - ELI5 explanations
     - Real-world examples
     - Auto-generated FAQ
     - Vocabulary definitions
@@ -187,17 +185,6 @@ class SmartDocumentGenerator:
                 "## 🎯 Simple Explanation",
                 "",
                 ai_content.simplified_explanation,
-                "",
-            ])
-        
-        # AI Enhanced: ELI5
-        if ai_content and ai_content.eli5_explanation:
-            lines.extend([
-                "---",
-                "",
-                "## 👶 Explain Like I'm 5 (ELI5)",
-                "",
-                f"*{ai_content.eli5_explanation}*",
                 "",
             ])
         
@@ -665,17 +652,6 @@ class SmartDocumentGenerator:
             </div>
 """
             
-            # ELI5
-            if ai_content.eli5_explanation:
-                html += f"""
-            <div class="section">
-                <h2 class="section-title"><span class="icon">👶</span> Explain Like I'm 5 (ELI5)</h2>
-                <div style="background: #fff8e1; padding: 25px; border-radius: 12px; border-left: 5px solid #ffc107; font-size: 1.15em; font-style: italic;">
-                    "{ai_content.eli5_explanation}"
-                </div>
-            </div>
-"""
-            
             # Key Takeaways
             if ai_content.key_takeaways:
                 html += """
@@ -906,16 +882,6 @@ class SmartDocumentGenerator:
                     pdf.cell(0, 5, line, ln=True)
                 pdf.ln(5)
             
-            # ELI5 (AI)
-            if ai_content and ai_content.eli5_explanation:
-                pdf.set_font('Helvetica', 'B', 12)
-                pdf.cell(0, 8, "EXPLAIN LIKE I'M 5", ln=True)
-                pdf.set_font('Helvetica', 'I', 10)
-                eli5 = clean(ai_content.eli5_explanation, 300)
-                for line in [eli5[i:i+90] for i in range(0, len(eli5), 90)]:
-                    pdf.cell(0, 5, line, ln=True)
-                pdf.ln(5)
-            
             # Key Takeaways (AI)
             if ai_content and ai_content.key_takeaways:
                 pdf.set_font('Helvetica', 'B', 12)
@@ -1040,12 +1006,6 @@ class SmartDocumentGenerator:
         if ai_content and ai_content.simplified_explanation:
             doc.add_heading("Simple Explanation", level=1)
             doc.add_paragraph(ai_content.simplified_explanation)
-        
-        # AI Enhanced: ELI5
-        if ai_content and ai_content.eli5_explanation:
-            doc.add_heading("Explain Like I'm 5", level=1)
-            p = doc.add_paragraph()
-            p.add_run(ai_content.eli5_explanation).italic = True
         
         # Key Takeaways
         if ai_content and ai_content.key_takeaways:

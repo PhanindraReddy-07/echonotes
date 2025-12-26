@@ -1,12 +1,12 @@
 """
-Smart Content Analyzer - Improved NLP Pipeline
-===============================================
-Better extraction of:
-- Executive Summary (using TF-IDF + position scoring)
-- Key Sentences (TextRank improved)
-- Key Concepts (noun phrase extraction + frequency)
-- Study Questions (template-based from concepts)
-- Related Topics (semantic similarity)
+Smart Content Analyzer - Enhanced NLP Pipeline v2
+==================================================
+Improved extraction algorithms for:
+- Executive Summary (multi-signal sentence scoring)
+- Key Sentences (hybrid TextRank + importance scoring)
+- Key Concepts (context-aware definition extraction)
+- Study Questions (intelligent template selection)
+- Related Topics (semantic matching)
 
 Works for BOTH meetings AND lectures/general content.
 """
@@ -97,19 +97,14 @@ class ContentAnalysis:
 
 class SmartAnalyzer:
     """
-    Improved Content Analyzer with better NLP
+    Enhanced Content Analyzer with improved NLP
     
     Uses:
-    - TF-IDF for term importance
-    - TextRank for sentence extraction
-    - Noun phrase patterns for concepts
-    - Template-based question generation
-    - **ML Model for sentence importance** (custom trained)
+    - Multi-signal sentence scoring (position, length, TF-IDF, cue phrases)
+    - Improved TextRank with damping
+    - Context-window concept definition extraction
+    - Intelligent question generation
     """
-    
-    # Flag for ML model availability
-    _ml_model = None
-    _ml_model_loaded = False
     
     # Expanded stopwords
     STOPWORDS = {
@@ -125,145 +120,139 @@ class SmartAnalyzer:
         'only', 'own', 'same', 'just', 'also', 'very', 'even', 'back', 'now',
         'new', 'first', 'last', 'long', 'great', 'little', 'own', 'other',
         'old', 'right', 'big', 'high', 'different', 'small', 'large', 'next',
-        'early', 'young', 'important', 'few', 'public', 'bad', 'same', 'able',
-        'about', 'after', 'again', 'against', 'because', 'before', 'below',
-        'between', 'during', 'into', 'through', 'under', 'until', 'while',
-        'above', 'across', 'along', 'among', 'around', 'behind', 'beside',
         'use', 'used', 'using', 'make', 'made', 'get', 'got', 'go', 'went',
         'come', 'came', 'take', 'took', 'see', 'saw', 'know', 'knew', 'think',
-        'thought', 'want', 'say', 'said', 'tell', 'told', 'ask', 'asked',
-        'work', 'seem', 'feel', 'try', 'leave', 'call', 'keep', 'let', 'begin',
-        'show', 'hear', 'play', 'run', 'move', 'live', 'believe', 'bring',
-        'happen', 'write', 'provide', 'sit', 'stand', 'lose', 'pay', 'meet',
-        'include', 'continue', 'set', 'learn', 'change', 'lead', 'understand',
-        'watch', 'follow', 'stop', 'create', 'speak', 'read', 'allow', 'add',
-        'spend', 'grow', 'open', 'walk', 'win', 'offer', 'remember', 'love',
-        'consider', 'appear', 'buy', 'wait', 'serve', 'die', 'send', 'expect',
-        'build', 'stay', 'fall', 'cut', 'reach', 'kill', 'remain', 'suggest',
-        'raise', 'pass', 'sell', 'require', 'report', 'decide', 'pull',
+        'said', 'tell', 'told', 'ask', 'asked', 'well', 'much', 'thing', 'things',
+        'like', 'really', 'want', 'way', 'going', 'something', 'actually',
+        'yeah', 'yes', 'okay', 'ok', 'um', 'uh', 'basically', 'literally',
     }
     
-    # Patterns for noun phrases (key concepts)
-    NOUN_PHRASE_PATTERNS = [
-        r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b',  # Proper noun phrases
-        r'\b([a-z]+(?:\s+[a-z]+){1,2})\s+(?:is|are|was|were)\b',  # X is/are
-        r'\b(?:the|a|an)\s+([a-z]+(?:\s+[a-z]+){0,2})\b',  # the/a X
-        r'\b([a-z]+ing)\s+([a-z]+)\b',  # -ing noun
-        r'\b([a-z]+tion|[a-z]+ment|[a-z]+ness|[a-z]+ity)\b',  # Abstract nouns
+    # Cue phrases that indicate important sentences
+    IMPORTANCE_CUE_PHRASES = {
+        'high': [
+            'in conclusion', 'to summarize', 'the main point', 'most importantly',
+            'the key', 'crucial', 'essential', 'fundamental', 'primary',
+            'significantly', 'notably', 'particularly', 'especially',
+            'the purpose', 'the goal', 'the objective', 'therefore',
+            'as a result', 'consequently', 'in summary', 'to conclude',
+            'the bottom line', 'ultimately', 'in essence',
+        ],
+        'medium': [
+            'for example', 'for instance', 'such as', 'including',
+            'first', 'second', 'third', 'finally', 'additionally',
+            'moreover', 'furthermore', 'however', 'although', 'while',
+            'because', 'since', 'due to', 'leads to', 'results in',
+            'according to', 'research shows', 'studies indicate',
+        ],
+    }
+    
+    # Definition patterns for extracting what something IS
+    DEFINITION_PATTERNS = [
+        r'{term}\s+(?:is|are|refers to|means|describes|represents)\s+(.+?)(?:\.|,\s+(?:which|that|and))',
+        r'{term}\s*[:\-]\s*(.+?)(?:\.|$)',
+        r'(?:called|known as|termed)\s+{term}\s*[,.]?\s*(.+?)(?:\.|$)',
+        r'(.+?)\s+(?:is|are)\s+(?:called|known as|termed)\s+{term}',
+        r'{term}\s+(?:can be defined as|is defined as)\s+(.+?)(?:\.|$)',
     ]
     
-    # Question templates
+    # Question templates with quality scoring
     QUESTION_TEMPLATES = {
-        'what_is': [
-            "What is {concept}?",
-            "Define {concept} in your own words.",
-            "Explain what {concept} means.",
-        ],
-        'how_does': [
-            "How does {concept} work?",
-            "Describe the process of {concept}.",
-            "Explain the mechanism behind {concept}.",
-        ],
-        'why': [
-            "Why is {concept} important?",
-            "What is the significance of {concept}?",
-            "Why do we need {concept}?",
-        ],
-        'compare': [
-            "Compare {concept1} and {concept2}.",
-            "What are the differences between {concept1} and {concept2}?",
-            "How does {concept1} relate to {concept2}?",
-        ],
-        'application': [
-            "Give an example of {concept} in practice.",
-            "How is {concept} applied in real-world scenarios?",
-            "Describe a situation where {concept} would be useful.",
-        ],
-        'analysis': [
-            "What are the advantages and disadvantages of {concept}?",
-            "Analyze the impact of {concept}.",
-            "What are the key features of {concept}?",
-        ],
+        'definition': {
+            'templates': [
+                "What is {concept} and why is it important?",
+                "Define {concept} in your own words.",
+                "Explain the concept of {concept}.",
+            ],
+            'difficulty': 'easy',
+            'type': 'factual'
+        },
+        'explanation': {
+            'templates': [
+                "How does {concept} work?",
+                "Describe the process or mechanism of {concept}.",
+                "What are the key components of {concept}?",
+            ],
+            'difficulty': 'medium',
+            'type': 'conceptual'
+        },
+        'significance': {
+            'templates': [
+                "Why is {concept} significant in this context?",
+                "What is the importance of {concept}?",
+                "What role does {concept} play?",
+            ],
+            'difficulty': 'medium',
+            'type': 'conceptual'
+        },
+        'comparison': {
+            'templates': [
+                "Compare and contrast {concept1} with {concept2}.",
+                "What are the key differences between {concept1} and {concept2}?",
+                "How does {concept1} relate to {concept2}?",
+            ],
+            'difficulty': 'hard',
+            'type': 'analytical'
+        },
+        'application': {
+            'templates': [
+                "Give a real-world example of {concept}.",
+                "How would you apply {concept} in practice?",
+                "In what situations would {concept} be most useful?",
+            ],
+            'difficulty': 'hard',
+            'type': 'application'
+        },
+        'analysis': {
+            'templates': [
+                "What are the advantages and disadvantages of {concept}?",
+                "Analyze the potential impact of {concept}.",
+                "What are the implications of {concept}?",
+            ],
+            'difficulty': 'hard',
+            'type': 'analytical'
+        },
     }
     
     # Topic keywords for related topics
     TOPIC_KEYWORDS = {
-        'Social Media': ['instagram', 'facebook', 'twitter', 'tiktok', 'youtube', 'social', 'post', 'share', 'followers', 'likes', 'content', 'viral', 'influencer'],
-        'Technology': ['software', 'hardware', 'computer', 'digital', 'internet', 'app', 'platform', 'system', 'data', 'algorithm', 'ai', 'machine'],
-        'Business': ['company', 'market', 'revenue', 'profit', 'customer', 'sales', 'product', 'service', 'brand', 'strategy'],
-        'Education': ['learn', 'student', 'teach', 'school', 'course', 'study', 'knowledge', 'training', 'skill'],
-        'Science': ['research', 'experiment', 'theory', 'study', 'discovery', 'scientific', 'hypothesis', 'evidence'],
-        'Health': ['health', 'medical', 'disease', 'treatment', 'patient', 'doctor', 'medicine', 'symptom'],
-        'Communication': ['message', 'share', 'connect', 'network', 'communicate', 'interact', 'conversation'],
-        'Media': ['photo', 'video', 'image', 'content', 'media', 'upload', 'download', 'stream'],
-        'Marketing': ['marketing', 'advertising', 'promotion', 'brand', 'campaign', 'audience', 'engagement'],
-        'User Experience': ['user', 'interface', 'feature', 'design', 'experience', 'usability', 'interaction'],
+        'Social Media': ['instagram', 'facebook', 'twitter', 'tiktok', 'youtube', 'social', 'post', 'share', 'followers', 'likes', 'content', 'viral', 'influencer', 'platform', 'feed', 'story', 'reel'],
+        'Technology': ['software', 'hardware', 'computer', 'digital', 'internet', 'app', 'platform', 'system', 'data', 'algorithm', 'ai', 'machine', 'code', 'programming', 'device', 'technology'],
+        'Business': ['company', 'market', 'revenue', 'profit', 'customer', 'sales', 'product', 'service', 'brand', 'strategy', 'business', 'investment', 'growth', 'management'],
+        'Education': ['learn', 'student', 'teach', 'school', 'course', 'study', 'knowledge', 'training', 'skill', 'education', 'class', 'lecture', 'university'],
+        'Science': ['research', 'experiment', 'theory', 'study', 'discovery', 'scientific', 'hypothesis', 'evidence', 'data', 'analysis', 'method'],
+        'Health': ['health', 'medical', 'disease', 'treatment', 'patient', 'doctor', 'medicine', 'symptom', 'therapy', 'diagnosis', 'wellness'],
+        'Communication': ['message', 'share', 'connect', 'network', 'communicate', 'interact', 'conversation', 'speak', 'listen', 'feedback'],
+        'Media': ['photo', 'video', 'image', 'content', 'media', 'upload', 'download', 'stream', 'watch', 'view', 'camera'],
+        'Marketing': ['marketing', 'advertising', 'promotion', 'brand', 'campaign', 'audience', 'engagement', 'reach', 'target', 'conversion'],
+        'Finance': ['money', 'payment', 'finance', 'bank', 'invest', 'budget', 'cost', 'price', 'income', 'expense', 'profit', 'loss'],
+        'Psychology': ['behavior', 'psychology', 'mental', 'emotion', 'cognitive', 'mind', 'perception', 'motivation', 'personality'],
+        'Environment': ['environment', 'climate', 'nature', 'sustainable', 'green', 'pollution', 'energy', 'ecosystem', 'conservation'],
     }
     
-    def __init__(self, use_ml_model: bool = True):
-        """
-        Initialize SmartAnalyzer.
-        
-        Args:
-            use_ml_model: Whether to use ML model for sentence scoring
-        """
-        self.use_ml_model = use_ml_model
-        self._load_ml_model()
-    
-    def _load_ml_model(self):
-        """Load ML model if available"""
-        if not self.use_ml_model:
-            return
-        
-        if SmartAnalyzer._ml_model_loaded:
-            return
-        
-        try:
-            from ml.sentence_classifier import SentenceImportanceClassifier
-            
-            classifier = SentenceImportanceClassifier()
-            model_path = classifier.MODEL_DIR / classifier.DEFAULT_MODEL
-            
-            if model_path.exists():
-                classifier.load_model()
-                SmartAnalyzer._ml_model = classifier
-                SmartAnalyzer._ml_model_loaded = True
-                print("[SmartAnalyzer] ML model loaded successfully")
-            else:
-                print("[SmartAnalyzer] ML model not found. Run 'python train_model.py' to train.")
-                SmartAnalyzer._ml_model_loaded = True  # Don't retry
-        except ImportError:
-            print("[SmartAnalyzer] ML module not available")
-            SmartAnalyzer._ml_model_loaded = True
-        except Exception as e:
-            print(f"[SmartAnalyzer] ML model error: {e}")
-            SmartAnalyzer._ml_model_loaded = True
+    def __init__(self):
+        """Initialize the analyzer"""
+        self._tfidf_cache = {}
     
     def analyze(self, text: str, title: str = "Document") -> ContentAnalysis:
         """
-        Perform comprehensive content analysis
-        
-        Args:
-            text: Input text
-            title: Document title
-            
-        Returns:
-            ContentAnalysis with all extracted information
+        Analyze text and extract structured content
         """
         # Clean and preprocess
         clean_text = self._clean_text(text)
         sentences = self._split_sentences(clean_text)
-        words = self._tokenize(clean_text)
         
-        # Calculate TF-IDF scores
+        if not sentences:
+            return self._empty_analysis(title)
+        
+        # Calculate TF-IDF for the document
         tfidf_scores = self._calculate_tfidf(sentences)
         
-        # Extract components (pass clean_text as document for ML scoring)
-        key_sentences = self._extract_key_sentences(sentences, tfidf_scores, num=5, document=clean_text)
-        executive_summary = self._generate_summary(sentences, tfidf_scores)
-        concepts = self._extract_concepts(clean_text, sentences, tfidf_scores)
-        questions = self._generate_questions(concepts, sentences)
-        related_topics = self._find_related_topics(clean_text)
+        # Extract components with improved algorithms
+        key_sentences = self._extract_key_sentences(sentences, tfidf_scores, max_sentences=5)
+        executive_summary = self._generate_summary(sentences, tfidf_scores, key_sentences)
+        concepts = self._extract_concepts(clean_text, sentences, tfidf_scores, max_concepts=8)
+        questions = self._generate_questions(concepts, sentences, key_sentences, max_questions=8)
+        related_topics = self._find_related_topics(clean_text, max_topics=6)
         
         # Meeting-specific extraction
         action_items = self._extract_actions(clean_text)
@@ -271,9 +260,8 @@ class SmartAnalyzer:
         deadlines = self._extract_deadlines(clean_text)
         
         # Statistics
-        word_count = len(words)
-        sentence_count = len(sentences)
-        reading_time = word_count / 200  # ~200 words per minute
+        word_count = len(clean_text.split())
+        reading_time = word_count / 200
         
         return ContentAnalysis(
             title=title,
@@ -283,7 +271,7 @@ class SmartAnalyzer:
             questions=questions,
             related_topics=related_topics,
             word_count=word_count,
-            sentence_count=sentence_count,
+            sentence_count=len(sentences),
             reading_time_minutes=round(reading_time, 1),
             action_items=action_items,
             decisions=decisions,
@@ -291,331 +279,267 @@ class SmartAnalyzer:
         )
     
     def _clean_text(self, text: str) -> str:
-        """Clean and normalize text - remove transcript metadata"""
+        """Clean and normalize text"""
         lines = text.split('\n')
-        clean_lines = []
+        content_lines = []
         
-        # Skip metadata patterns
         skip_patterns = [
-            r'^EchoNotes\s+Transcript',
-            r'^Audio:',
-            r'^Duration:',
-            r'^Words:',
-            r'^Confidence:',
-            r'^TRANSCRIPT:',
-            r'^WITH\s+TIMESTAMPS:',
-            r'^Recording',
-            r'^Generated:',
-            r'^={3,}',
-            r'^-{3,}',
-            r'^\[\d{2}:\d{2}\]',
+            r'^={2,}', r'^-{2,}', r'^\[.*\]$',
+            r'^transcript:', r'^audio:', r'^duration:',
+            r'^confidence:', r'^words:', r'^timestamps:',
+            r'^generated:', r'^echonotes',
         ]
         
-        import re
         for line in lines:
             line = line.strip()
             if not line:
                 continue
             
-            # Check if line matches any skip pattern
             skip = False
             for pattern in skip_patterns:
                 if re.match(pattern, line, re.IGNORECASE):
                     skip = True
                     break
-            
             if skip:
                 continue
             
-            # Remove timestamp markers like [00:10]
-            line = re.sub(r'\[\d{2}:\d{2}\]', '', line).strip()
+            line = re.sub(r'\[\d{1,2}:\d{2}(?::\d{2})?\]', '', line).strip()
             
-            # Skip very short lines or metadata-like content
-            if len(line) < 10:
-                continue
-            if line.lower().startswith(('audio', 'duration', 'words', 'confidence', 'transcript')):
-                continue
-            
-            clean_lines.append(line)
+            if line and len(line) > 5:
+                content_lines.append(line)
         
-        text = ' '.join(clean_lines)
+        text = ' '.join(content_lines)
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\s+([.,!?;:])', r'\1', text)
         
-        # Normalize whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Fix sentence boundaries
-        text = re.sub(r'([.!?])([A-Z])', r'\1 \2', text)
-        
-        return text
+        return text.strip()
     
     def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences"""
-        # Better sentence splitting
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        result = []
+        """Split text into sentences with better handling"""
+        text = re.sub(r'\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|e\.g|i\.e)\.\s+', r'\1<DOT> ', text)
+        sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+        sentences = [s.replace('<DOT>', '.') for s in sentences]
         
-        for sent in sentences:
-            sent = sent.strip()
-            if len(sent) > 15:  # Minimum sentence length
-                # Capitalize first letter
-                if sent and sent[0].islower():
-                    sent = sent[0].upper() + sent[1:]
-                # Ensure ends with punctuation
-                if sent and sent[-1] not in '.!?':
-                    sent += '.'
-                result.append(sent)
+        result = []
+        for s in sentences:
+            s = s.strip()
+            words = s.split()
+            if len(s) >= 20 and len(words) >= 4:
+                result.append(s)
         
         return result
     
-    def _tokenize(self, text: str) -> List[str]:
-        """Tokenize text into words"""
-        words = re.findall(r'\b[a-zA-Z]{2,}\b', text.lower())
-        return [w for w in words if w not in self.STOPWORDS]
-    
     def _calculate_tfidf(self, sentences: List[str]) -> Dict[str, float]:
         """Calculate TF-IDF scores for terms"""
-        if not sentences:
-            return {}
-        
-        # Document frequency
-        doc_freq = Counter()
+        term_doc_freq = Counter()
         term_freq = Counter()
         
         for sent in sentences:
-            words = set(self._tokenize(sent))
+            words = self._tokenize(sent)
+            unique_words = set(words)
+            for word in unique_words:
+                term_doc_freq[word] += 1
             for word in words:
-                doc_freq[word] += 1
-            term_freq.update(self._tokenize(sent))
+                term_freq[word] += 1
         
-        # Calculate TF-IDF
-        num_docs = len(sentences)
+        n_docs = len(sentences)
         tfidf = {}
         
-        for word, tf in term_freq.items():
-            df = doc_freq[word]
-            idf = math.log(num_docs / (df + 1)) + 1
-            tfidf[word] = tf * idf
+        for term, tf in term_freq.items():
+            df = term_doc_freq[term]
+            idf = math.log((n_docs + 1) / (df + 1)) + 1
+            tfidf[term] = tf * idf
         
-        # Normalize
-        max_score = max(tfidf.values()) if tfidf else 1
-        return {k: v / max_score for k, v in tfidf.items()}
+        if tfidf:
+            max_score = max(tfidf.values())
+            tfidf = {k: v / max_score for k, v in tfidf.items()}
+        
+        return tfidf
     
-    def _score_sentence(
-        self,
-        sentence: str,
-        position: int,
-        total: int,
-        tfidf: Dict[str, float],
-        document: str = ""
-    ) -> float:
-        """
-        Score a sentence's importance using hybrid approach:
-        - ML model score (if available) - 50% weight
-        - Rule-based score - 50% weight
-        """
-        # Try ML model first
-        ml_score = None
-        if SmartAnalyzer._ml_model is not None and document:
-            try:
-                ml_score = SmartAnalyzer._ml_model.predict(
-                    sentence, document, position, total
-                )
-            except Exception as e:
-                pass  # Fall back to rule-based
-        
-        # Rule-based scoring
-        rule_score = self._rule_based_score(sentence, position, total, tfidf)
-        
-        # Combine scores
-        if ml_score is not None:
-            # Hybrid: 50% ML + 50% rule-based
-            final_score = 0.5 * ml_score + 0.5 * rule_score
-        else:
-            final_score = rule_score
-        
-        return min(final_score, 1.0)
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize and filter text"""
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        return [w for w in words if w not in self.STOPWORDS]
     
-    def _rule_based_score(
-        self,
-        sentence: str,
-        position: int,
-        total: int,
-        tfidf: Dict[str, float]
-    ) -> float:
-        """Original rule-based sentence scoring"""
+    def _score_sentence(self, sentence: str, position: int, total_sentences: int, tfidf_scores: Dict[str, float]) -> float:
+        """Score a sentence using multiple signals"""
         score = 0.0
-        words = self._tokenize(sentence)
         
-        if not words:
-            return 0.0
+        # 1. Position score
+        relative_pos = position / max(1, total_sentences - 1)
+        if relative_pos < 0.2:
+            position_score = 1.0 - (relative_pos * 2)
+        elif relative_pos > 0.8:
+            position_score = (relative_pos - 0.8) * 2 + 0.4
+        else:
+            position_score = 0.3
+        score += position_score * 0.2
         
-        # TF-IDF score (average of word scores)
-        word_scores = [tfidf.get(w, 0) for w in words]
-        if word_scores:
-            score += sum(word_scores) / len(word_scores) * 0.4
+        # 2. Length score
+        words = sentence.split()
+        word_count = len(words)
+        if 15 <= word_count <= 40:
+            length_score = 1.0
+        elif word_count < 15:
+            length_score = word_count / 15
+        else:
+            length_score = max(0.3, 1.0 - (word_count - 40) / 60)
+        score += length_score * 0.15
         
-        # Position score (first sentences more important)
-        if position == 0:
-            score += 0.25
-        elif position < total * 0.2:
-            score += 0.15
-        elif position > total * 0.8:
-            score += 0.05
+        # 3. TF-IDF score
+        tokens = self._tokenize(sentence)
+        if tokens:
+            tfidf_score = sum(tfidf_scores.get(t, 0) for t in tokens) / len(tokens)
+            score += tfidf_score * 0.4
         
-        # Length score (prefer medium length)
-        if 15 <= len(words) <= 35:
-            score += 0.15
-        elif 10 <= len(words) <= 40:
-            score += 0.1
+        # 4. Cue phrase score
+        sentence_lower = sentence.lower()
+        cue_score = 0.0
+        for phrase in self.IMPORTANCE_CUE_PHRASES['high']:
+            if phrase in sentence_lower:
+                cue_score = 1.0
+                break
+        if cue_score == 0:
+            for phrase in self.IMPORTANCE_CUE_PHRASES['medium']:
+                if phrase in sentence_lower:
+                    cue_score = 0.5
+                    break
+        score += cue_score * 0.25
         
-        # Keyword indicators
-        indicators = [
-            'important', 'key', 'main', 'significant', 'essential',
-            'allows', 'enables', 'provides', 'offers', 'includes',
-            'means', 'defined', 'known', 'called', 'refers',
-            'first', 'originally', 'founded', 'created', 'launched',
-            'million', 'billion', 'percent', 'over', 'more than'
-        ]
-        sent_lower = sentence.lower()
-        for word in indicators:
-            if word in sent_lower:
-                score += 0.05
-        
-        return min(score, 1.0)
+        return score
     
-    def _extract_key_sentences(
-        self,
-        sentences: List[str],
-        tfidf: Dict[str, float],
-        num: int = 5,
-        document: str = ""
-    ) -> List[str]:
-        """Extract most important sentences using hybrid ML + rule-based scoring"""
-        if len(sentences) <= num:
+    def _extract_key_sentences(self, sentences: List[str], tfidf_scores: Dict[str, float], max_sentences: int = 5) -> List[str]:
+        """Extract key sentences using multi-signal scoring"""
+        if len(sentences) <= max_sentences:
             return sentences
         
-        # Score all sentences
-        scored = []
+        scored_sentences = []
         for i, sent in enumerate(sentences):
-            score = self._score_sentence(sent, i, len(sentences), tfidf, document)
-            scored.append((score, i, sent))
+            score = self._score_sentence(sent, i, len(sentences), tfidf_scores)
+            scored_sentences.append((i, sent, score))
         
-        # Get top sentences by score
-        scored.sort(reverse=True)
-        top_indices = sorted([idx for _, idx, _ in scored[:num]])
+        textrank_scores = self._textrank_sentences(sentences)
+        for i, (idx, sent, score) in enumerate(scored_sentences):
+            if idx < len(textrank_scores):
+                combined = score * 0.7 + textrank_scores[idx] * 0.3
+                scored_sentences[i] = (idx, sent, combined)
         
-        # Return in original order
-        return [sentences[i] for i in top_indices]
+        scored_sentences.sort(key=lambda x: -x[2])
+        selected = scored_sentences[:max_sentences]
+        selected.sort(key=lambda x: x[0])
+        
+        return [sent for _, sent, _ in selected]
     
-    def _generate_summary(
-        self,
-        sentences: List[str],
-        tfidf: Dict[str, float],
-        max_sentences: int = 3
-    ) -> str:
-        """Generate executive summary"""
-        if not sentences:
-            return ""
+    def _textrank_sentences(self, sentences: List[str], damping: float = 0.85) -> List[float]:
+        """Calculate TextRank scores for sentences"""
+        n = len(sentences)
+        if n == 0:
+            return []
+        if n == 1:
+            return [1.0]
         
-        if len(sentences) <= max_sentences:
-            return ' '.join(sentences)
+        tokenized = [set(self._tokenize(s)) for s in sentences]
+        matrix = [[0.0] * n for _ in range(n)]
         
-        # Get top sentences
-        key = self._extract_key_sentences(sentences, tfidf, max_sentences)
-        return ' '.join(key)
-    
-    def _extract_concepts(
-        self,
-        text: str,
-        sentences: List[str],
-        tfidf: Dict[str, float],
-        max_concepts: int = 8
-    ) -> List[ExtractedConcept]:
-        """Extract key concepts using multiple methods"""
-        concepts = {}
+        for i in range(n):
+            for j in range(n):
+                if i != j and tokenized[i] and tokenized[j]:
+                    intersection = len(tokenized[i] & tokenized[j])
+                    union = len(tokenized[i] | tokenized[j])
+                    if union > 0:
+                        matrix[i][j] = intersection / union
         
-        # Terms to skip (metadata, common words)
-        skip_terms = {
-            'transcript', 'audio', 'duration', 'words', 'confidence', 'recording',
-            'echonotes', 'timestamps', 'generated', 'notes', 'document',
-            'the', 'this', 'that', 'with', 'from', 'have', 'will', 'been',
-            'american', 'located', 'define', 'term'
-        }
+        for i in range(n):
+            row_sum = sum(matrix[i])
+            if row_sum > 0:
+                matrix[i] = [x / row_sum for x in matrix[i]]
         
-        # Method 1: High TF-IDF single words
-        sorted_terms = sorted(tfidf.items(), key=lambda x: -x[1])
-        for term, score in sorted_terms[:20]:
-            if len(term) >= 4 and term.lower() not in self.STOPWORDS and term.lower() not in skip_terms:
-                concepts[term] = {
-                    'score': score,
-                    'freq': 1,
-                    'context': ''
-                }
-        
-        # Method 2: Proper nouns and noun phrases
-        proper_nouns = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
-        for phrase in proper_nouns:
-            phrase_lower = phrase.lower()
-            # Skip metadata and common terms
-            if phrase_lower in self.STOPWORDS or phrase_lower in skip_terms:
-                continue
-            if len(phrase) <= 3:
-                continue
+        scores = [1.0 / n] * n
+        for _ in range(50):
+            new_scores = []
+            for i in range(n):
+                score = (1 - damping) / n
+                for j in range(n):
+                    score += damping * matrix[j][i] * scores[j]
+                new_scores.append(score)
             
-            if phrase_lower in concepts:
-                concepts[phrase_lower]['score'] += 0.3
-                concepts[phrase_lower]['freq'] += 1
-            else:
-                concepts[phrase_lower] = {
-                    'score': 0.5,
-                    'freq': 1,
-                    'context': ''
-                }
+            diff = sum(abs(new_scores[i] - scores[i]) for i in range(n))
+            scores = new_scores
+            if diff < 1e-6:
+                break
         
-        # Method 3: "X is a/an Y" patterns for definitions
-        definition_patterns = [
-            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+(?:a|an|the)\s+([^.]+)',
-            r'([A-Z][a-z]+)\s+(?:are|was|were)\s+([^.]+)',
+        if scores:
+            max_score = max(scores)
+            if max_score > 0:
+                scores = [s / max_score for s in scores]
+        
+        return scores
+    
+    def _generate_summary(self, sentences: List[str], tfidf_scores: Dict[str, float], key_sentences: List[str], max_words: int = 100) -> str:
+        """Generate executive summary from key sentences"""
+        if not key_sentences:
+            return sentences[0] if sentences else ""
+        
+        summary_parts = []
+        word_count = 0
+        
+        for sent in key_sentences:
+            words = sent.split()
+            if word_count + len(words) <= max_words:
+                summary_parts.append(sent)
+                word_count += len(words)
+            elif word_count == 0:
+                truncated = ' '.join(words[:max_words])
+                if not truncated.endswith('.'):
+                    truncated += '...'
+                summary_parts.append(truncated)
+                break
+        
+        return ' '.join(summary_parts)
+    
+    def _extract_concepts(self, text: str, sentences: List[str], tfidf_scores: Dict[str, float], max_concepts: int = 8) -> List[ExtractedConcept]:
+        """Extract key concepts with context-aware definitions"""
+        concepts = {}
+        text_lower = text.lower()
+        
+        # Method 1: Proper noun phrases
+        proper_nouns = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', text)
+        for term in proper_nouns:
+            term_lower = term.lower()
+            if term_lower not in self.STOPWORDS and len(term) > 2:
+                freq = len(re.findall(re.escape(term_lower), text_lower))
+                if freq >= 1:
+                    score = freq * 0.3 + sum(tfidf_scores.get(w, 0) for w in term_lower.split())
+                    concepts[term_lower] = {'display': term, 'score': score, 'freq': freq, 'definition': ''}
+        
+        # Method 2: High TF-IDF terms
+        top_terms = sorted(tfidf_scores.items(), key=lambda x: -x[1])[:30]
+        for term, score in top_terms:
+            if term not in concepts and len(term) > 3:
+                freq = len(re.findall(r'\b' + re.escape(term) + r'\b', text_lower))
+                if freq >= 2:
+                    concepts[term] = {'display': term.title(), 'score': score, 'freq': freq, 'definition': ''}
+        
+        # Method 3: Compound terms
+        compound_patterns = [
+            r'\b(\w+\s+(?:system|service|platform|network|method|process|model|theory|approach|technique|strategy|concept|principle|framework|algorithm|protocol))\b',
+            r'\b((?:data|user|content|social|digital|online|mobile)\s+\w+)\b',
         ]
+        for pattern in compound_patterns:
+            matches = re.findall(pattern, text_lower)
+            for match in matches:
+                if match not in concepts and len(match.split()) <= 3:
+                    freq = text_lower.count(match)
+                    if freq >= 1:
+                        concepts[match] = {'display': match.title(), 'score': 0.5 + freq * 0.1, 'freq': freq, 'definition': ''}
         
-        for pattern in definition_patterns:
-            matches = re.findall(pattern, text)
-            for term, definition in matches:
-                term_lower = term.lower()
-                if term_lower in concepts:
-                    concepts[term_lower]['context'] = definition[:150]
-                    concepts[term_lower]['score'] += 0.2
-                elif len(term) > 3:
-                    concepts[term_lower] = {
-                        'score': 0.6,
-                        'freq': 1,
-                        'context': definition[:150]
-                    }
-        
-        # Method 4: Compound terms (X service, X platform, etc.)
-        compounds = re.findall(
-            r'\b(\w+\s+(?:service|platform|system|network|app|application|feature|tool|method))\b',
-            text.lower()
-        )
-        for compound in compounds:
-            if compound not in concepts:
-                concepts[compound] = {
-                    'score': 0.4,
-                    'freq': 1,
-                    'context': ''
-                }
-            else:
-                concepts[compound]['score'] += 0.2
-        
-        # Find context for concepts without definitions
+        # Extract definitions
         for term, data in concepts.items():
-            if not data['context']:
-                for sent in sentences:
-                    if term in sent.lower():
-                        data['context'] = sent[:200]
-                        break
+            definition = self._extract_definition(term, sentences, text)
+            if definition:
+                data['definition'] = definition
+                data['score'] += 0.3
         
-        # Sort by score and create ExtractedConcept objects
         sorted_concepts = sorted(concepts.items(), key=lambda x: -x[1]['score'])
         
         result = []
@@ -625,7 +549,6 @@ class SmartAnalyzer:
             if len(result) >= max_concepts:
                 break
             
-            # Skip if similar term already added
             skip = False
             for seen in seen_terms:
                 if term in seen or seen in term:
@@ -634,160 +557,258 @@ class SmartAnalyzer:
             if skip:
                 continue
             
-            # Create definition
-            if data['context']:
-                definition = data['context']
-            else:
-                definition = f"A key concept discussed in this content."
+            definition = data['definition']
+            if not definition:
+                definition = self._generate_fallback_definition(term, sentences)
             
             result.append(ExtractedConcept(
-                term=term.title(),
+                term=data['display'],
                 definition=definition,
                 frequency=data['freq'],
-                importance_score=data['score']
+                importance_score=min(1.0, data['score'])
             ))
             seen_terms.add(term)
         
         return result
     
-    def _generate_questions(
-        self,
-        concepts: List[ExtractedConcept],
-        sentences: List[str],
-        max_questions: int = 8
-    ) -> List[GeneratedQuestion]:
-        """Generate study questions from concepts"""
+    def _extract_definition(self, term: str, sentences: List[str], text: str) -> str:
+        """Extract a proper definition for a term"""
+        term_escaped = re.escape(term)
+        
+        for pattern_template in self.DEFINITION_PATTERNS:
+            pattern = pattern_template.format(term=term_escaped)
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                definition = match.group(1).strip()
+                if 10 < len(definition) < 300:
+                    definition = definition[0].upper() + definition[1:]
+                    if not definition.endswith('.'):
+                        definition += '.'
+                    return definition
+        
+        best_sentence = None
+        best_score = 0
+        
+        for sent in sentences:
+            if term in sent.lower():
+                score = 0
+                sent_lower = sent.lower()
+                
+                if re.search(rf'\b{term_escaped}\s+(?:is|are|means|refers to)', sent_lower):
+                    score += 3
+                if 'defined as' in sent_lower or 'known as' in sent_lower:
+                    score += 2
+                if any(phrase in sent_lower for phrase in ['for example', 'such as', 'including']):
+                    score += 1
+                
+                term_pos = sent_lower.find(term)
+                if term_pos < len(sent) * 0.3:
+                    score += 1
+                
+                if 40 < len(sent) < 200:
+                    score += 1
+                
+                if score > best_score:
+                    best_score = score
+                    best_sentence = sent
+        
+        if best_sentence and best_score >= 1:
+            if len(best_sentence) > 250:
+                best_sentence = best_sentence[:250].rsplit(' ', 1)[0] + '...'
+            return best_sentence
+        
+        return ""
+    
+    def _generate_fallback_definition(self, term: str, sentences: List[str]) -> str:
+        """Generate a fallback definition"""
+        for sent in sentences:
+            if term in sent.lower():
+                if len(sent) > 250:
+                    sent = sent[:250].rsplit(' ', 1)[0] + '...'
+                return sent
+        
+        return f"A key concept discussed in this content related to {term}."
+    
+    def _generate_questions(self, concepts: List[ExtractedConcept], sentences: List[str], key_sentences: List[str], max_questions: int = 8) -> List[GeneratedQuestion]:
+        """Generate intelligent study questions"""
         questions = []
         
-        # Generate "What is" questions for top concepts
-        for i, concept in enumerate(concepts[:4]):
-            template = self.QUESTION_TEMPLATES['what_is'][i % len(self.QUESTION_TEMPLATES['what_is'])]
-            q = GeneratedQuestion(
+        if not concepts:
+            return questions
+        
+        # Definition questions
+        for i, concept in enumerate(concepts[:3]):
+            template_data = self.QUESTION_TEMPLATES['definition']
+            template = template_data['templates'][i % len(template_data['templates'])]
+            
+            questions.append(GeneratedQuestion(
                 question=template.format(concept=concept.term),
-                answer_hint=concept.definition[:100] + "..." if len(concept.definition) > 100 else concept.definition,
-                question_type='factual',
-                difficulty='easy',
+                answer_hint=self._truncate_hint(concept.definition),
+                question_type=template_data['type'],
+                difficulty=template_data['difficulty'],
                 source_sentence=concept.definition
-            )
-            questions.append(q)
+            ))
         
-        # Generate "Why" question
+        # Explanation question
         if concepts:
-            q = GeneratedQuestion(
-                question=f"Why is {concepts[0].term} significant?",
-                answer_hint="Consider its role and impact discussed in the content.",
-                question_type='conceptual',
-                difficulty='medium'
-            )
-            questions.append(q)
+            template_data = self.QUESTION_TEMPLATES['explanation']
+            questions.append(GeneratedQuestion(
+                question=template_data['templates'][0].format(concept=concepts[0].term),
+                answer_hint=self._truncate_hint(concepts[0].definition),
+                question_type=template_data['type'],
+                difficulty=template_data['difficulty']
+            ))
         
-        # Generate comparison question if multiple concepts
+        # Significance question
         if len(concepts) >= 2:
-            template = self.QUESTION_TEMPLATES['compare'][0]
-            q = GeneratedQuestion(
-                question=template.format(concept1=concepts[0].term, concept2=concepts[1].term),
-                answer_hint="Look for similarities and differences in their descriptions.",
-                question_type='analytical',
-                difficulty='medium'
-            )
-            questions.append(q)
+            template_data = self.QUESTION_TEMPLATES['significance']
+            questions.append(GeneratedQuestion(
+                question=template_data['templates'][0].format(concept=concepts[1].term),
+                answer_hint="Consider the role and impact discussed in the content.",
+                question_type=template_data['type'],
+                difficulty=template_data['difficulty']
+            ))
         
-        # Generate application question
-        if concepts:
-            template = self.QUESTION_TEMPLATES['application'][0]
-            q = GeneratedQuestion(
-                question=template.format(concept=concepts[0].term),
-                answer_hint="Think about real-world scenarios where this applies.",
-                question_type='application',
-                difficulty='hard'
-            )
-            questions.append(q)
+        # Comparison question
+        if len(concepts) >= 2:
+            template_data = self.QUESTION_TEMPLATES['comparison']
+            questions.append(GeneratedQuestion(
+                question=template_data['templates'][0].format(concept1=concepts[0].term, concept2=concepts[1].term),
+                answer_hint="Compare their definitions, purposes, and relationships.",
+                question_type=template_data['type'],
+                difficulty=template_data['difficulty']
+            ))
         
-        # Generate analysis question
+        # Application question
         if concepts:
-            template = self.QUESTION_TEMPLATES['analysis'][0]
-            q = GeneratedQuestion(
-                question=template.format(concept=concepts[0].term),
-                answer_hint="Consider both positive and negative aspects.",
-                question_type='analytical',
-                difficulty='hard'
-            )
-            questions.append(q)
+            template_data = self.QUESTION_TEMPLATES['application']
+            questions.append(GeneratedQuestion(
+                question=template_data['templates'][0].format(concept=concepts[0].term),
+                answer_hint="Think about practical scenarios where this applies.",
+                question_type=template_data['type'],
+                difficulty=template_data['difficulty']
+            ))
+        
+        # Analysis question
+        if len(concepts) >= 1:
+            template_data = self.QUESTION_TEMPLATES['analysis']
+            questions.append(GeneratedQuestion(
+                question=template_data['templates'][0].format(concept=concepts[min(2, len(concepts)-1)].term),
+                answer_hint="Consider both benefits and limitations.",
+                question_type=template_data['type'],
+                difficulty=template_data['difficulty']
+            ))
         
         return questions[:max_questions]
     
-    def _find_related_topics(self, text: str, max_topics: int = 5) -> List[str]:
-        """Find related topics based on content"""
+    def _truncate_hint(self, text: str, max_length: int = 150) -> str:
+        """Truncate hint to reasonable length"""
+        if len(text) <= max_length:
+            return text
+        return text[:max_length].rsplit(' ', 1)[0] + '...'
+    
+    def _find_related_topics(self, text: str, max_topics: int = 6) -> List[str]:
+        """Find related topics based on keyword matching"""
         text_lower = text.lower()
         topic_scores = {}
         
         for topic, keywords in self.TOPIC_KEYWORDS.items():
-            score = sum(1 for kw in keywords if kw in text_lower)
-            if score >= 2:
+            score = 0
+            matched_keywords = 0
+            for kw in keywords:
+                count = len(re.findall(r'\b' + re.escape(kw) + r'\b', text_lower))
+                if count > 0:
+                    score += min(count, 5)
+                    matched_keywords += 1
+            
+            if matched_keywords >= 2:
                 topic_scores[topic] = score
         
-        # Sort by score
         sorted_topics = sorted(topic_scores.items(), key=lambda x: -x[1])
         return [topic for topic, _ in sorted_topics[:max_topics]]
     
     def _extract_actions(self, text: str) -> List[str]:
         """Extract action items from text"""
         patterns = [
-            r'(\w+)\s+will\s+(\w+.+?)(?:[.!]|$)',
-            r'(\w+)\s+should\s+(\w+.+?)(?:[.!]|$)',
-            r'(\w+)\s+needs?\s+to\s+(\w+.+?)(?:[.!]|$)',
-            r'action\s*(?:item)?[:\s]+(.+?)(?:[.!]|$)',
-            r'todo[:\s]+(.+?)(?:[.!]|$)',
+            r'(?:we|I|you|they)\s+(?:will|should|need to|must|have to)\s+([^.!?]+)',
+            r'action\s*(?:item)?[:\s]+([^.!?]+)',
+            r'todo[:\s]+([^.!?]+)',
+            r'(?:please|kindly)\s+([^.!?]+)',
+            r'(?:make sure|ensure|remember)\s+to\s+([^.!?]+)',
         ]
         
         actions = []
         for pattern in patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if isinstance(match, tuple):
-                    action = f"{match[0]} will {match[1]}" if len(match) > 1 else match[0]
-                else:
-                    action = match
-                if len(action) > 10 and len(action) < 200:
-                    actions.append(action.strip())
+                action = match.strip()
+                if 15 < len(action) < 200:
+                    action = action[0].upper() + action[1:]
+                    actions.append(action)
         
-        return list(set(actions))[:5]
+        seen = set()
+        unique_actions = []
+        for a in actions:
+            a_lower = a.lower()
+            if a_lower not in seen:
+                seen.add(a_lower)
+                unique_actions.append(a)
+        
+        return unique_actions[:5]
     
     def _extract_decisions(self, text: str) -> List[str]:
         """Extract decisions from text"""
         patterns = [
-            r'(?:we\s+)?decided\s+(?:to\s+)?(.+?)(?:[.!]|$)',
-            r'decision[:\s]+(.+?)(?:[.!]|$)',
-            r'agreed\s+(?:to|on|that)\s+(.+?)(?:[.!]|$)',
-            r"let'?s\s+go\s+with\s+(.+?)(?:[.!]|$)",
+            r'(?:we|they|team)\s+decided\s+(?:to\s+)?([^.!?]+)',
+            r'decision[:\s]+([^.!?]+)',
+            r'(?:we|they)\s+agreed\s+(?:to|on|that)\s+([^.!?]+)',
+            r"let'?s\s+(?:go with|use|do)\s+([^.!?]+)",
+            r'(?:final|the)\s+(?:decision|choice)\s+(?:is|was)\s+(?:to\s+)?([^.!?]+)',
         ]
         
         decisions = []
         for pattern in patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if len(match) > 10 and len(match) < 200:
-                    decisions.append(match.strip())
+                decision = match.strip()
+                if 10 < len(decision) < 200:
+                    decision = decision[0].upper() + decision[1:]
+                    decisions.append(decision)
         
         return list(set(decisions))[:5]
     
     def _extract_deadlines(self, text: str) -> List[str]:
         """Extract deadlines from text"""
         patterns = [
-            r'by\s+((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))',
-            r'by\s+(tomorrow|today|tonight)',
-            r'by\s+(next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday))',
-            r'by\s+(end\s+of\s+(?:day|week|month))',
-            r'deadline[:\s]+(.+?)(?:[.!]|$)',
-            r'due\s+(?:by|on)?\s*(.+?)(?:[.!]|$)',
-            r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d+',
+            r'(?:by|before|until)\s+((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)[^.!?]*)',
+            r'(?:by|before|until)\s+(tomorrow|today|tonight|end of (?:day|week|month))',
+            r'(?:by|before|until)\s+(next\s+(?:week|month|monday|tuesday|wednesday|thursday|friday)[^.!?]*)',
+            r'deadline[:\s]+([^.!?]+)',
+            r'due\s+(?:by|on|date)?[:\s]*([^.!?]+)',
+            r'((?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,?\s*\d{4})?)',
         ]
         
         deadlines = []
         for pattern in patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if len(match) > 2 and len(match) < 100:
-                    deadlines.append(match.strip())
+                deadline = match.strip()
+                if 3 < len(deadline) < 100:
+                    deadline = deadline[0].upper() + deadline[1:]
+                    deadlines.append(deadline)
         
         return list(set(deadlines))[:5]
+    
+    def _empty_analysis(self, title: str) -> ContentAnalysis:
+        """Return empty analysis for edge cases"""
+        return ContentAnalysis(
+            title=title,
+            executive_summary="No content available for analysis.",
+            key_sentences=[],
+            concepts=[],
+            questions=[],
+            related_topics=[],
+            word_count=0,
+            sentence_count=0,
+            reading_time_minutes=0.0
+        )
